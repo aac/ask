@@ -1,0 +1,80 @@
+name: Release Smoke
+
+# Cross-platform smoke matrix: ensure the ask binary builds and the test
+# suite passes on the shipped developer platforms (linux + macOS).
+#
+# windows-latest is REMOVED until its test failures are fixed (act-fb4402):
+# file-locking in TestRunMCPWorkdirChdirs, CRLF/setup issues in the version-stamp
+# tests, etc. Windows support is aspirational, and ask ships no Windows binary
+# (.goreleaser.yml targets darwin + linux), so it does not gate releases for now.
+# Re-add windows-latest here once act-fb4402 lands.
+#
+# Triggered on `v*` tag push only — per-push / per-PR runs were dropped to
+# cut Actions burn. macOS minutes count 10x against the included quota, so
+# running this matrix on every PR was the single largest contributor to
+# billing-cycle exhaustion. Regressions in normal development show up via
+# the plain `ci.yml` job on ubuntu-latest; cross-OS regressions surface at
+# release time.
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-smoke-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4
+
+      - name: Set up Go
+        uses: actions/setup-go@0a12ed9d6a96ab950c8f026ed9f722fe0da7ef32 # v5
+        with:
+          go-version: '1.25'
+
+      - name: Cache Go modules
+        uses: actions/cache@0c907a75c2c80ebcb7f088228285e798b750cf8f # v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-matrix-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-matrix-
+
+      - name: Build
+        run: go build ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test ./...
+
+      - name: Summary
+        if: always()
+        shell: bash
+        env:
+          JOB_STATUS: ${{ job.status }}
+          MATRIX_OS: ${{ matrix.os }}
+        run: |
+          if [ "$JOB_STATUS" = "success" ]; then
+            echo "PASS: $MATRIX_OS"
+            echo "PASS: $MATRIX_OS" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "FAIL: $MATRIX_OS"
+            echo "FAIL: $MATRIX_OS" >> "$GITHUB_STEP_SUMMARY"
+          fi

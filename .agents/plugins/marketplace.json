@@ -1,0 +1,20 @@
+{
+  "name": "ask",
+  "interface": {
+    "displayName": "ask"
+  },
+  "plugins": [
+    {
+      "name": "ask",
+      "source": {
+        "source": "url",
+        "url": "https://github.com/aac/ask.git"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_FIRST_USE"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

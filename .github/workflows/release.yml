@@ -1,0 +1,23 @@
+name: Release
+
+# Thin caller of the canonical release pipeline (plugin-release-kit). On a
+# vX.Y.Z tag this builds the binary tarballs (via this repo's .goreleaser.yml,
+# including the ad-hoc darwin codesign + execute-verify) AND the self-contained
+# ask-plugin.zip, attaching both to a draft GitHub Release. The mechanism lives
+# in one place so it can't drift across tools. The reusable workflow runs with
+# `contents: write`, so it is pinned to an immutable commit SHA (not a moving
+# branch/tag) to prevent a supply-chain change from gaining write access here.
+# Bump the SHA deliberately when adopting kit changes.
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    # plugin-release-kit main @ 2026-06-26 (security-hardened)
+    uses: aac/plugin-release-kit/.github/workflows/release-plugin.yml@1fb25c9741752447131baf6a59c8773570e903bb
+    with:
+      tool: ask
+    permissions:
+      contents: write

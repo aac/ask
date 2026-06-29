@@ -1,0 +1,35 @@
+# Go build outputs
+bin/
+dist/
+*.exe
+*.test
+*.out
+
+# ask state (per-user, per-machine)
+.ask/
+
+# Editor / OS
+.DS_Store
+.vscode/
+.idea/
+.act/index.db
+
+# Agent worktrees (created by Claude orchestrator)
+.claude/
+.act/
+
+# Build-side agent orientation (private; not shipped in public clones — see act-e85f74).
+# Kept locally for development agents; use-facing docs live in README.md / SKILL.md.
+/CLAUDE.md
+.claude/settings.local.json
+
+# Scope-review revised drafts pending review (operator-workflow artifact)
+*.revised.md
+
+# Internal process/design docs — operator-workflow artifacts, not shipped (kept local).
+docs/brief.md
+docs/plan-v1.md
+docs/design-ask-affordance-and-multi-recipient.md
+docs/blocks-hook-design.md
+docs/session-handoff.md
+docs/reviews/

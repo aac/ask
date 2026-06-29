@@ -1,0 +1,86 @@
+#!/usr/bin/env bash
+# commit-msg hook for the ask repo (act-9df9).
+#
+# Blocks direct work commits to `main` from the main checkout. Agents
+# dispatched by the orchestrator are supposed to run in a worktree under
+# .claude/worktrees/agent-<id>/. When their cwd is wrong they commit into
+# main's working tree, the close-gate passes (tree is fine), and main ends
+# up with rogue commits the orchestrator then has to recover.
+#
+# Escape conditions (any one of these allows the commit):
+#   - Current branch is not `main` (every worktree has its own branch).
+#   - A merge is in progress (MERGE_HEAD exists in $GIT_DIR).
+#   - The commit message's first line starts with `act-op:` (the `act` CLI's
+#     own bookkeeping commits — claim/close/etc — are legitimate on main).
+#   - $ASK_ALLOW_DIRECT_MAIN is non-empty (manual escape hatch).
+#
+# Install once, per checkout, with:
+#   git config --local core.hooksPath .githooks
+#
+# Worktrees inherit core.hooksPath via the parent config, so the hook fires
+# everywhere, but the branch check makes it a no-op anywhere except main.
+
+set -uo pipefail
+
+msg_file="${1:-}"
+
+# Resolve current branch. On a detached HEAD `--show-current` prints empty;
+# treat that as "not main" and allow the commit (rebases, cherry-picks, etc).
+branch="$(git symbolic-ref --short -q HEAD 2>/dev/null || true)"
+
+if [ "$branch" != "main" ]; then
+  exit 0
+fi
+
+# Merge in progress: allow. Covers `git merge --ff-only` (which is the
+# orchestrator's normal integration path; ff merges don't create a commit
+# so this is mostly defensive) and any real merge commit.
+git_dir="$(git rev-parse --git-dir 2>/dev/null || echo .git)"
+if [ -e "$git_dir/MERGE_HEAD" ]; then
+  exit 0
+fi
+
+# Manual escape hatch.
+if [ -n "${ASK_ALLOW_DIRECT_MAIN:-}" ]; then
+  exit 0
+fi
+
+# act-op: bookkeeping commits are allowed.
+first_line=""
+if [ -n "$msg_file" ] && [ -r "$msg_file" ]; then
+  first_line="$(head -n1 "$msg_file" 2>/dev/null || true)"
+fi
+case "$first_line" in
+  "act-op:"*)
+    exit 0
+    ;;
+esac
+
+# Otherwise: block. Print a clear message aimed at sub-agents who forgot
+# to cd into their worktree.
+cwd="$(pwd)"
+cat >&2 <<EOF
+[commit-msg] BLOCKED: direct commit to 'main' from $cwd
+
+If you are a sub-agent dispatched by the orchestrator, you are in the
+WRONG DIRECTORY. Each dispatched agent has its own worktree at:
+
+  <repo-root>/.claude/worktrees/agent-<id>/
+
+Run 'pwd' to confirm where you are. If the path does not contain
+'.claude/worktrees/agent-', cd into your worktree and re-run the commit
+there. Do not 'git checkout' a different branch in the main checkout —
+that leaves main's working tree dirty for the next agent.
+
+Allowed on main without the bypass:
+  - commits with a message starting with 'act-op:' (the act CLI's
+    bookkeeping commits)
+  - merges in progress (MERGE_HEAD set; e.g. orchestrator ff-merges)
+  - commits on any branch other than main
+
+Bypass (use sparingly, e.g. when Andrew is hand-editing on main):
+  ASK_ALLOW_DIRECT_MAIN=1 git commit ...
+
+Hook: .githooks/commit-msg (act-9df9)
+EOF
+exit 1

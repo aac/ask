@@ -1,0 +1,88 @@
+# GoReleaser config for ask
+# Docs: https://goreleaser.com
+# Validate locally with: goreleaser check
+#
+# This config drives the GitHub Actions release workflow (.github/workflows/release.yml)
+# on every git tag of the form vX.Y.Z. It cross-compiles darwin/linux x arm64/amd64
+# and uploads tarballs + checksums to the GitHub Release.
+#
+# Scope:
+#   - darwin/linux x arm64/amd64 binaries on every tag
+#   - Homebrew dropped: the plugin is the canonical install path
+#   - macOS code-signing / notarization not yet wired (see signing notes before flipping draft=false)
+#
+# Binary name: ask.  Main package: ./cmd/ask.  Version is injected at link time via
+# -ldflags -X github.com/aac/ask/internal/version.Binary=<tag>, matching the
+# scheme already used by the Makefile (`make release-local`).
+
+version: 2
+
+project_name: ask
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: ask
+    main: ./cmd/ask
+    binary: ask
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X github.com/aac/ask/internal/version.Binary={{ .Version }}
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    hooks:
+      # Ad-hoc sign darwin binaries so they run on Apple Silicon (no-op on linux).
+      # Free, no Apple account; requires the release job to run on a macOS runner.
+      # See scripts/codesign-adhoc.sh. Verify on a real tagged run before draft=false.
+      post:
+        - ./scripts/codesign-adhoc.sh {{ .Os }} {{ .Path }}
+
+archives:
+  - id: ask
+    # Asset name pattern must stay in sync with scripts/install.sh's URL construction
+    # (the platform-detection block in that script).
+    name_template: >-
+      ask_{{ .Version }}_
+      {{- .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else if eq .Arch "arm64" }}arm64
+      {{- else }}{{ .Arch }}{{ end }}
+    formats:
+      - tar.gz
+    files:
+      - README.md
+      - LICENSE*
+
+checksum:
+  name_template: "checksums.txt"
+  algorithm: sha256
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^ci:"
+      - "^chore:"
+      - "Merge pull request"
+      - "Merge branch"
+
+release:
+  # Draft = true keeps the human in the loop on first release; flip to false once
+  # the pipeline is dogfooded end-to-end (see distribution-readiness §0).
+  draft: true
+  prerelease: auto
+  name_template: "{{ .Tag }}"
