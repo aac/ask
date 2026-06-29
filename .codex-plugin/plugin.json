@@ -6,7 +6,7 @@
   "license": "Apache-2.0",
   "keywords": ["agent", "inbox", "human-in-the-loop", "mcp", "codex"],
   "skills": "./skills/",
-  "mcpServers": "./.mcp.json",
+  "mcpServers": "./.codex-plugin/mcp.json",
   "interface": {
     "displayName": "ask",
     "shortDescription": "Agent-to-human request inbox for project-local asks.",

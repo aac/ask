@@ -1,5 +1,7 @@
 # Go build outputs
-bin/
+# bin/ is TRACKED: the plugin ships per-arch binaries + a uname launcher (a
+# "source":"./" marketplace install only gets tracked files). Staged via the
+# kit's stage-binaries; do not re-gitignore.
 dist/
 *.exe
 *.test

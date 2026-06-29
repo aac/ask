@@ -15,8 +15,8 @@ on:
 
 jobs:
   release:
-    # plugin-release-kit main @ 2026-06-26 (security-hardened)
-    uses: aac/plugin-release-kit/.github/workflows/release-plugin.yml@1fb25c9741752447131baf6a59c8773570e903bb
+    # plugin-release-kit main @ 2026-06-29 (committed-binaries + per-host MCP model)
+    uses: aac/plugin-release-kit/.github/workflows/release-plugin.yml@a0307bb174b0a263d0ef9602e9d165c49aacd398
     with:
       tool: ask
     permissions:
