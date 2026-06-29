@@ -1,23 +1,28 @@
 name: Release
 
-# Thin caller of the canonical release pipeline (plugin-release-kit). On a
-# vX.Y.Z tag this builds the binary tarballs (via this repo's .goreleaser.yml,
-# including the ad-hoc darwin codesign + execute-verify) AND the self-contained
-# ask-plugin.zip, attaching both to a draft GitHub Release. The mechanism lives
-# in one place so it can't drift across tools. The reusable workflow runs with
-# `contents: write`, so it is pinned to an immutable commit SHA (not a moving
-# branch/tag) to prevent a supply-chain change from gaining write access here.
-# Bump the SHA deliberately when adopting kit changes.
+# On-demand PREPARE-RELEASE caller of the canonical plugin-release-kit workflow.
+# Release model: COMMIT-TO-MAIN — both Claude (`/plugin install`) and Codex install
+# the plugin from the repo's default branch (no git tags; the manifest `version`
+# field drives update-detection). Dispatching this workflow bumps the version,
+# cross-compiles + stamps + ad-hoc-signs the per-arch binaries via stage-binaries,
+# runs verify-release as a hard gate, and commits the result to the default branch.
+# No tags, no GitHub Releases, no tarballs, nothing built locally. The reusable
+# workflow runs with `contents: write`, so it is pinned to an immutable commit SHA
+# (not a moving branch/tag) to prevent a supply-chain change from gaining write
+# access here. Bump the SHA deliberately when adopting kit changes.
 on:
-  push:
-    tags:
-      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "x.y.z"
+        required: true
 
 jobs:
   release:
-    # plugin-release-kit main @ 2026-06-29 (committed-binaries + per-host MCP model)
-    uses: aac/plugin-release-kit/.github/workflows/release-plugin.yml@a0307bb174b0a263d0ef9602e9d165c49aacd398
+    # plugin-release-kit main @ 2026-06-29 (commit-to-main, CI-built)
+    uses: aac/plugin-release-kit/.github/workflows/release-plugin.yml@633a24735e1063c979619770787aa67752b0111e
     with:
       tool: ask
+      version: ${{ inputs.version }}
     permissions:
       contents: write

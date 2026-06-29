@@ -55,8 +55,15 @@ handshake still holds.
 
 ## Releasing
 
-Releases are cut by tagging `vX.Y.Z`; the release pipeline (the shared `plugin-release-kit`
-reusable workflow, pinned to an immutable commit SHA in `.github/workflows/release.yml`)
-builds the binary tarballs and the self-contained plugin zip and attaches them to a draft
-GitHub Release. The version's single source of truth is `metadata.version` in
-`skills/ask/SKILL.md`, kept in lockstep across the manifests.
+The release model is **commit-to-main**: both Claude (`/plugin install`) and Codex install
+the plugin from the repo's default branch — neither consults git tags, and the `version`
+field in the manifests drives update-detection. A release is therefore a commit to `main`,
+produced by CI.
+
+Cut one by dispatching `.github/workflows/release.yml` (`workflow_dispatch`) with the target
+`version`. On a macOS runner the shared `plugin-release-kit` reusable workflow (pinned to an
+immutable commit SHA) bumps the version across the manifests, cross-compiles + stamps +
+ad-hoc-signs the per-arch binaries into the tracked `bin/` via `stage-binaries`, runs
+`verify-release` as a hard gate, and commits the result to `main`. No tags, no GitHub
+Releases, no tarballs, nothing built locally. The version's single source of truth is
+`metadata.version` in `skills/ask/SKILL.md`, kept in lockstep across the manifests.
