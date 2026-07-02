@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+- `ask install-skill` command and the in-binary skill `go:embed`. Skill delivery is now
+  plugin-first: `/plugin install ask@ask` ships and auto-discovers the skill. The bare
+  binary is CLI-only; a source install (`install.sh`) copies `skills/ask/` from the
+  checkout, and non-plugin users can copy it from a repo clone.
+
 ## [0.1.0]
 
 ### Added

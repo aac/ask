@@ -20,11 +20,11 @@ Commands:
   harvest        Copy items from a worktree's .ask/ into this store
                  (for orchestrators surfacing worktree-filed asks).
   mcp            Start MCP server on stdio.
-  install-skill  Install the embedded ask skill into ~/.claude/skills/ask.
   help [topic]   Show this help, or a topic: workflow, verifier, mcp, schema.
   version        Print binary version.
 
-First time? See README.md for setup, or run ask install-skill.
+First time? See README.md for setup. The ask skill ships with the plugin
+(/plugin install ask@ask); a source install copies it from the checkout.
 
 For the agent-facing rules and discipline, see the ask skill at
 ~/.claude/skills/ask/SKILL.md.

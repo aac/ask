@@ -2,8 +2,8 @@
 
 Conventions for anyone (agent or human) working **on the `ask` codebase itself** — how to
 develop, test, and reason about changes here. This is build-side; it is *not* how to *use*
-`ask` as an agent-to-human inbox (that lives in the `ask` skill — `ask install-skill`, then
-`ask help`). Written for a contributor with no prior context.
+`ask` as an agent-to-human inbox (that lives in the `ask` skill, which ships with the
+plugin; run `ask help`). Written for a contributor with no prior context.
 
 `ask` is a single Go binary providing CLI + MCP for an agent-to-human request inbox:
 agents file requests for actions only a human can take, the human resolves them, a verifier
@@ -35,8 +35,9 @@ rules, and move it when you find it misfiled:
   pattern — the MCP tools mirror the CLI one-to-one (`ask_new`, `ask_list`, …).
 - **This repo dogfoods ask on its own backlog.** Mid-flight discoveries about ask itself are
   common; file them and keep working — that's the dogfood signal.
-- **The skill tree is `go:embed`-ed** via `skills/embed.go` (embeds `skills/ask/`), and
-  `ask install-skill` writes it to the host for non-plugin installs. There is exactly one
+- **The skill tree is plain files at `skills/ask/`**, shipped with the plugin and
+  auto-discovered by the host (`/plugin install ask@ask`); a source install (`install.sh`)
+  copies it from the checkout. It is not embedded in the binary. There is exactly one
   canonical skill tree; do not add a second copy.
 
 ## Pre-commit gate

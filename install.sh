@@ -12,7 +12,7 @@
 #   1. Detects the target harness (claude or codex), or accepts --target flag.
 #   2. Verifies Go is installed.
 #   3. Builds ask from source into $PREFIX/bin/ask (default ~/.local/bin).
-#   4. Runs ask install-skill to populate ~/.claude/skills/ask (or codex equiv).
+#   4. Copies skills/ask/ from the checkout into ~/.claude/skills/ask (or codex equiv).
 #   5. Registers the ask MCP server in the agent's config:
 #        Claude: claude mcp add --scope user ask -- ask mcp
 #        Codex : codex mcp add ask -- ask mcp
@@ -194,9 +194,22 @@ mkdir -p "$BIN_DIR"
 say "binary: ${BIN_PATH}"
 
 # ---- install skill ----------------------------------------------------------
+# The skill ships as plain files in the checkout (skills/ask/); copy them into
+# the harness skills dir. No longer embedded in the binary — the plugin install
+# is the canonical skill path, and this source install just copies from the repo.
 
-say "installing ask skill..."
-"$BIN_PATH" install-skill 2>/dev/null || warn "ask install-skill failed (non-fatal; skill may need manual install)"
+case "$TARGET" in
+  claude) SKILL_DEST="${HOME}/.claude/skills/ask" ;;
+  codex)  SKILL_DEST="${HOME}/.codex/skills/ask" ;;
+  *)      SKILL_DEST="" ;;
+esac
+if [ -n "$SKILL_DEST" ] && [ -d "${REPO_DIR}/skills/ask" ]; then
+  say "installing ask skill to ${SKILL_DEST}..."
+  mkdir -p "$SKILL_DEST"
+  cp -R "${REPO_DIR}/skills/ask/." "$SKILL_DEST/" || warn "skill copy failed (non-fatal; copy ${REPO_DIR}/skills/ask manually)"
+else
+  warn "skill not installed (skills/ask not found in ${REPO_DIR}); copy it manually if needed"
+fi
 
 # ---- register MCP server ----------------------------------------------------
 

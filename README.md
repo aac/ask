@@ -110,8 +110,8 @@ picture:
 
 ### Codex without the plugin
 
-For Codex CLI, install the skill with `ask install-skill --target codex` (writes
-`~/.codex/skills/ask/`), or symlink it from a repo clone with
+For Codex CLI, install the skill from a repo clone — copy `skills/ask/` into
+`~/.codex/skills/ask/`, or symlink it with
 `ln -s <path-to-ask-clone>/skills/ask ~/.codex/skills/ask`. Register MCP by copying this
 repo's `.mcp.json` into the target project — Codex reads `.mcp.json` from the project root
 on startup:
