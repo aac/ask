@@ -26,18 +26,19 @@ import (
 	"fmt"
 	"io"
 	"os"
+
+	"github.com/aac/ask/internal/version"
 )
 
 // protocolVersion is the MCP wire version we advertise during initialize.
 // Spec §5: server name ask-mcp, protocol version 2024-11-05.
 const protocolVersion = "2024-11-05"
 
-// serverName / serverVersion are echoed in the initialize response so MCP
-// clients can render an identifying label in their UIs. serverVersion is
-// pinned for v1 and will track the binary version once a single source is
-// chosen (Task 14+).
+// serverName is echoed in the initialize response so MCP clients can render an
+// identifying label. The version echoed alongside it is version.Binary — the
+// single stamped source that `ask version` also reports — never a separate
+// literal (a hardcoded copy drifts every release; verify-release check 7 gates it).
 const serverName = "ask-mcp"
-const serverVersion = "0.1.0"
 
 // Server is a stdio MCP host. It owns the JSON-RPC framing, the tool
 // registry, and the per-tool dispatch glue. One Server is single-threaded:
@@ -229,7 +230,7 @@ func (s *Server) handleInitialize(enc *json.Encoder, req jsonRPCRequest) {
 		},
 		"serverInfo": map[string]any{
 			"name":    serverName,
-			"version": serverVersion,
+			"version": version.Binary,
 		},
 	}
 	s.writeResult(enc, req.ID, res)

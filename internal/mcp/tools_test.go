@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aac/ask/internal/version"
+
 	"github.com/aac/ask/internal/core"
 )
 
@@ -133,6 +135,13 @@ func TestInitialize(t *testing.T) {
 	}
 	if got.ServerInfo.Name != serverName {
 		t.Errorf("server name: got %q want %q", got.ServerInfo.Name, serverName)
+	}
+	// serverInfo.version must track the single stamped source (version.Binary),
+	// not a hardcoded literal — a divergent copy drifts every release (ask 0.2.0
+	// shipped 0.1.0 here). verify-release check 7 gates this at release time; this
+	// pins it at unit time so a re-hardcoded value fails fast.
+	if got.ServerInfo.Version != version.Binary {
+		t.Errorf("server version: got %q want %q (must read internal/version.Binary)", got.ServerInfo.Version, version.Binary)
 	}
 	if _, ok := got.Capabilities["tools"]; !ok {
 		t.Errorf("capabilities missing tools entry: %+v", got.Capabilities)
