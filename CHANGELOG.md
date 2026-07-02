@@ -7,10 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1]
+
 ### Fixed
 - MCP `serverInfo.version` now reads the stamped `internal/version.Binary` (the same
   source as `ask version`) instead of a hardcoded `0.1.0` literal, so it no longer
   drifts from the release version. verify-release check 7 gates this going forward.
+
+## [0.2.0]
 
 ### Removed
 - `ask install-skill` command and the in-binary skill `go:embed`. Skill delivery is now
