@@ -9,7 +9,7 @@
       "name": "ask",
       "source": "./",
       "description": "Agent-to-human request inbox. A single binary (CLI + MCP) for AI coding agents to file requests for actions only a human can take — set up a credential, sign into a service, give feedback on a feature, copy a file to a path the agent can't reach. Items live as plain JSON in .ask/ inside any project. No server, no database, no schema setup.",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "author": {
         "name": "Andrew Cove"
       },

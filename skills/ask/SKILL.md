@@ -1,7 +1,7 @@
 ---
 name: ask
 metadata:
-  version: "0.1.0"
+  version: "0.2.0"
 description: Use when you need a human to take an action an agent can't — set up an OAuth credential, sign into a service, place a file at a path the agent can't reach, give feedback on a UI — and the action outlives the chat the filing agent is in. Also trigger in any repo with a .ask/ directory at its root or an ancestor, when the user mentions "what's in my inbox", "file an ask", "ask request", or ask-XXXX ids, or when an agent uses ask MCP tools (ask_new, ask_list, ask_resolve, ask_reopen, ask_close). Covers the file-resolve-verify-close arc, when to file vs. ask in chat, verifier discipline, and orchestrator checkpoints. Also trigger when an agent generates follow-ups, next steps, or open items in a task, recap, or status report — each item needing a human action outside the chat should be an ask, not a chat bullet. Fire on phrasings like "next steps require the user", "blocked on a decision", "follow-ups need a call", "you'll need to", "the user should", "later you should", or any list of human-action items.
 ---
 
