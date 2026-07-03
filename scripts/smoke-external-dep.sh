@@ -60,13 +60,16 @@ STEP="pre-flight: ask --blocks flag on new + list"
 ASK_NEW_HELP=$(ask new --help 2>&1 || true)
 ASK_LIST_HELP=$(ask list --help 2>&1 || true)
 ACT_UPDATE_HELP=$(act update --help 2>&1 || true)
+ACT_DEPADD_HELP=$(act dep add --help 2>&1 || true)
 
 case "$ASK_NEW_HELP"   in (*-blocks*)  ;; (*) missing "ask new --blocks (file the ask with a cross-tool ref)" ;; esac
 case "$ASK_LIST_HELP"  in (*-blocks*)  ;; (*) missing "ask list --blocks (filter by blocked ref)" ;; esac
 
-STEP="pre-flight: act --ext-add / --ext-rm flags on update"
-case "$ACT_UPDATE_HELP" in (*-ext-add*) ;; (*) missing "act update --ext-add (register external dep)" ;; esac
-case "$ACT_UPDATE_HELP" in (*-ext-rm*)  ;; (*) missing "act update --ext-rm (clear external dep)"  ;; esac
+STEP="pre-flight: act dep add --external (add) + act update --ext-rm (clear) flags"
+# act-ce1427 unified external-blocker *adds* under `act dep add --external`
+# (symmetric with --blocked-by); removal stays on `act update --ext-rm`.
+case "$ACT_DEPADD_HELP" in (*-external*) ;; (*) missing "act dep add --external (register external dep)" ;; esac
+case "$ACT_UPDATE_HELP" in (*-ext-rm*)   ;; (*) missing "act update --ext-rm (clear external dep)"  ;; esac
 
 ok "binaries present and advertise the new flags"
 
@@ -140,9 +143,9 @@ ok "ask list --blocks filter resolves to $SCRATCH_ASK_ID"
 
 # ---- step 3: register the reciprocal external dep --------------------------
 
-STEP="3: act update --ext-add $SCRATCH_ASK_ID $SCRATCH_ACT_ID"
-EXT_ADD_OUT=$(act update --ext-add "$SCRATCH_ASK_ID" --no-commit "$SCRATCH_ACT_ID" 2>&1) \
-    || fail "act update --ext-add exited nonzero: $EXT_ADD_OUT"
+STEP="3: act dep add $SCRATCH_ACT_ID --external $SCRATCH_ASK_ID"
+EXT_ADD_OUT=$(act dep add "$SCRATCH_ACT_ID" --external "$SCRATCH_ASK_ID" --no-commit 2>&1) \
+    || fail "act dep add --external exited nonzero: $EXT_ADD_OUT"
 ok "external dep $SCRATCH_ASK_ID attached to $SCRATCH_ACT_ID"
 
 # ---- step 4: assert act ready excludes the blocked issue -------------------
