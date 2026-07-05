@@ -38,7 +38,7 @@ You rarely type `ask` yourself; the agent is the primary operator on both sides.
 ## Quick start
 
 You don't run ask as a daily driver yourself; you install the plugin and your agent drives
-it. In **Claude Code** (CLI or Desktop):
+it. In **Claude Code**:
 
 ```text
 /plugin marketplace add aac/ask
@@ -95,18 +95,20 @@ feedback-destination pattern) on top of `ask help`'s mechanics.
 
 ## Installing
 
-The plugin (Quick start above) is the canonical path and bundles everything. The full
-picture:
+Installing the plugin is the canonical path — it bundles the binary, the skill, and the
+MCP server. ask is built for **Claude Code** and **Codex**, the two harnesses where the
+plugin and its MCP server work today:
 
-- **Claude Code (CLI or Desktop):** `/plugin marketplace add aac/ask`, then
-  `/plugin install ask@ask`.
-- **Cowork / Claude Desktop:** Customize → plugins → Add marketplace, pointed at `aac/ask`.
-  The bundled binary runs inside the sandbox — nothing else to set up.
+- **Claude Code:** `/plugin marketplace add aac/ask`, then `/plugin install ask@ask`.
 - **Codex:** `codex plugin marketplace add aac/ask`, then `codex plugin add ask@ask`. The
   Codex manifest points at the bundled skill (`./skills/`) and MCP server config
   (`./.mcp.json`); Codex launches the MCP server from the active project root.
-- **Or point your agent at this repo** (`github.com/aac/ask`) and let it install whatever
-  way fits its environment.
+- **No plugin manager?** Point your agent at this repo (`github.com/aac/ask`) and let it
+  install whatever way fits its environment.
+
+Cowork, the Claude Desktop app, and claude.ai aren't supported hosts yet: they can't launch
+the plugin's MCP server the way the CLI harnesses do. Support for them is a planned
+addition, not a requirement for anything above.
 
 ### Codex without the plugin
 
