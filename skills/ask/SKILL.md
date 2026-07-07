@@ -28,16 +28,16 @@ Run `ask help` once at the start of any session in an ask-enabled project. The s
 
 ### When you are generating a list of follow-ups
 
-**If you are about to emit a bullet list of "next steps," "open items," "follow-ups," or "things the user should do," apply the predicate below to each item before writing it to chat.** Items that pass the predicate belong in ask, not in a chat bullet — chat output is ephemeral; an ask survives the session and is visible to the next agent or session resume. Filing is automatic (see CLAUDE.md: "default to handling git yourself" generalizes: default to filing rather than surfacing in chat). The concrete trigger flows are:
+**If you are about to emit a bullet list of "next steps," "open items," "follow-ups," or "things the user should do," apply the predicate below to each item before writing it to chat.** Items that pass the predicate belong in ask, not in a chat bullet — chat output is ephemeral; an ask survives past the current window of human interaction and stays visible — to the next agent, or to you whenever the human next engages. Filing is automatic (see CLAUDE.md: "default to handling git yourself" generalizes: default to filing rather than surfacing in chat). The concrete trigger flows are:
 
-- **End-of-session recaps and wrap-up.** Any session recap, wrap-up, or status-report output that lists human-action items. For each item, run the predicate; file the ask before emitting the recap. Print a summary line like "Filed N asks — use `ask list` to see them" at the end of the recap.
+- **End-of-interaction recaps and wrap-up.** Any recap, wrap-up, or status-report output that lists human-action items — the trigger is the human stepping away, not the agent's process ending, so this can fire more than once inside one long-running or continuous session. For each item, run the predicate; file the ask before emitting the recap. Print a summary line like "Filed N asks — use `ask list` to see them" at the end of the recap.
 - **Plan-mode blockers.** When mapping out a multi-step plan and you discover a step that requires a human action before the next agent can proceed, file the ask now (urgency `blocker` if it's on the critical path) rather than adding it to the plan as a "you'll need to…" note.
 - **Mid-task walls.** Anytime you say "you'll need to," "the user should," "later you should," "next steps require the user," or "blocked on a decision" — stop and file. The phrases are the signal; the ask is the action.
 
 > **The single predicate: is your current iteration blocked on this answer?**
 >
 > - **Yes** — ask in chat (using whatever in-conversation question mechanism your harness provides). The human's response feeds straight back into your loop; filing is indirection.
-> - **No** — it's ask-shaped. The consumer of the resolution is some *future* agent (possibly you in a later session, more often someone else), not the one currently typing. The human will get to it on their own clock.
+> - **No** — it's ask-shaped. The consumer of the resolution is some *future* agent (possibly you, once this window of human interaction has closed; more often someone else), not the one currently typing. The human will get to it on their own clock.
 >
 > The wrong framing is "is this a question or an action?" — many ask-shaped items are decisions the human has to make on their own time. The right framing is *who consumes the answer, and when*.
 
@@ -45,7 +45,7 @@ A common miss: **human decisions where the next agent (not the filer) acts on th
 
 Subsequent rules:
 
-- Only file for actions that survive the filing agent's session.
+- Only file for actions that outlive the current window of human interaction — not merely the filing agent's session, which can run long and continuous well past any one such window. The boundary that matters is when the human steps away, not when the agent's process ends.
 - One ask per discrete action. If a single failure point has two distinct human steps (set up OAuth *and* invite a bot), that's two asks unless the steps are truly atomic.
 - Provide enough context in `body` that some future agent — not the filer — can act on the resolution: URLs, file paths, env-var names, expected outcomes.
 - Don't file what you can resolve yourself. If you can write the file, run the command, hit the API — do it. ask is for the boundary you literally cannot cross.
@@ -113,7 +113,7 @@ ask is pull-based: it doesn't deliver, route, or notify — the receiver polls w
 
 ## When you're not just filing
 
-- **Resuming a session, or running a long work loop:** see `references/on-resume.md` for the resolve-verifier-close cycle and orchestrator-checkpoint polling.
+- **Picking up work after the human's been away, or running a long work loop:** see `references/on-resume.md` for the resolve-verifier-close cycle and orchestrator-checkpoint polling.
 - **Filing an fyi-feedback ask, or coordinating the human's chat for someone else's filed feedback:** see `references/feedback-patterns.md` for the same-session shortcut and the feedback-destination pattern.
 
 **Idempotent no-op exits 6, not 0.** An idempotent no-op means the verifier ran, found the condition already satisfied, and made no change (e.g. `ask resolve` on an already-resolved item). `ask resolve` on an already-resolved item, `ask close` on an already-closed item, and `ask reopen` on an item not in `resolved` all succeed-as-no-ops with exit code 6 (and a stderr warning). The state is correct; the call just didn't change anything. Scripts under `set -e` will trip on this — orchestrator loops polling for state should treat exit 6 as success (equivalent to 0) or branch explicitly. The success-shape payload (id or item JSON on stdout) is still emitted.
