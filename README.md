@@ -168,17 +168,6 @@ polish.
 Design & internals: [`docs/spec.md`](docs/spec.md) is the authoritative implementation
 contract — field types, error shapes, exit codes, JSON shapes.
 
-## Convergence test: ask + act cross-tool protocol
-
-[`scripts/smoke-external-dep.sh`](scripts/smoke-external-dep.sh) is the canonical
-convergence test for the surface-via-report protocol (see `docs/brief.md` →
-Blocker-handling protocol). It exercises both binaries end-to-end against an isolated
-tempdir: files an `ask` with `--blocks <act-id>`, registers the reciprocal
-`act update --ext-add`, asserts `act ready` excludes the blocked issue, resolves the ask,
-clears the dep, and asserts the issue returns to `act ready`. The script self-cleans on
-exit, runs no network ops, and fails fast with a named step on any drift. Run it after
-rebuilding either binary to confirm the handshake still holds.
-
 ## Uninstall
 
 Remove the plugin through your agent's plugin manager. If you installed the `ask` binary
