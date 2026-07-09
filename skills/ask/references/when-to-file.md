@@ -1,14 +1,12 @@
 # When to file an ask — anti-patterns and judgment heuristics
 
-The skill's load-bearing rule: **never use ask for anything your harness's native in-conversation mechanisms would serve.** This reference unpacks that — common shapes where filing is the wrong move, and a few heuristics for the genuinely ambiguous middle.
+Unpacks the skill's load-bearing rule (**never use ask for what your harness's native in-conversation mechanisms would serve**): shapes where filing is wrong, and heuristics for the ambiguous middle.
 
 ## The interrupt budget
 
-Every ask the human eventually sees is an interrupt to their day. They are not sitting at a triage queue waiting for items. They re-encounter `ask` items the next time they pick up a project, usually mid-something-else.
+Every ask the human eventually sees is an interrupt — they re-encounter items the next time they pick up a project, usually mid-something-else, not at a triage queue. Model it as a small daily interrupt budget per project: spend a `blocker` on something that genuinely halts progress, a `normal` on something needed this week, an `fyi` freely — but stale fyis pile up and erode trust in the inbox.
 
-A useful mental model: the human has a small daily interrupt budget for any given project. Spend a `blocker` on something that genuinely halts progress; spend a `normal` on something the project needs from them this week; spend an `fyi` freely but remember that even fyis pile up and stale fyis erode trust in the inbox.
-
-Concretely: if you find yourself filing two asks in the same session for the same project, ask whether one of them is actually a clarifying question you should have asked the user in chat, or whether they should be combined (see "Two asks vs. one composite" below).
+If you're filing two asks in one session for the same project, check whether one is actually a clarifying question for chat, or whether they should be combined (see "Two asks vs. one composite").
 
 ## Anti-patterns
 

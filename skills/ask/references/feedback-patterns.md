@@ -1,6 +1,6 @@
 # Feedback-shaped asks — same-session shortcut and feedback-destination pattern
 
-Some asks aren't requests for the human to *do* something — they're requests for the human's *feedback* on something (review a design, sanity-check a doc, look at a UI screenshot). These have their own patterns because the "deliverable" is a human's words, not a filesystem change.
+Some asks request the human's *feedback* rather than an action (review a design, sanity-check a doc, look at a UI). The "deliverable" is a human's words, not a filesystem change, so they have their own patterns.
 
 ## Same-session feedback shortcut
 
