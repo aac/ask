@@ -28,9 +28,12 @@ rules, and move it when you find it misfiled:
 
 ## Project specifics
 
-- **The binary** builds to `./bin/ask` (gitignored); rebuild with
-  `go build -o bin/ask ./cmd/ask`. The binaries that ship with the plugin are produced by
-  the release pipeline (CI cross-compiles and bundles them at tag time), never committed.
+- **`bin/ask` is a tracked launcher script**, not a build artifact — it picks the right
+  per-arch binary (`bin/ask-<os>-<arch>`, also tracked) at runtime. Don't run
+  `go build -o bin/ask ./cmd/ask`; that clobbers the launcher with a single-platform binary.
+  For local development, build to a different path, e.g. `go build -o /tmp/ask ./cmd/ask`.
+  The tracked `bin/` contents are produced by the release pipeline (CI cross-compiles,
+  stamps, and commits them at release time via `stage-binaries`) — see Releasing below.
 - **MCP is implemented in-tree** (no external library), following the in-binary server
   pattern — the MCP tools mirror the CLI one-to-one (`ask_new`, `ask_list`, …).
 - **This repo dogfoods ask on its own backlog.** Mid-flight discoveries about ask itself are
