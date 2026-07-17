@@ -1,6 +1,6 @@
 # On-resume verification and orchestrator-checkpoint polling
 
-`ask` has no event bus, no notifications, and no background processes — it's a state store. Agents drive everything around it by reading state at the right moments. This reference covers two of those moments: verifying resolved items on session resume, and checkpoint-polling in long work loops.
+`ask` is a state store — no event bus, no notifications, no background processes; agents drive it by reading state at the right moments. Two of those moments: verifying resolved items on resume, and checkpoint-polling in long work loops.
 
 ## Verifying resolved items on session resume
 

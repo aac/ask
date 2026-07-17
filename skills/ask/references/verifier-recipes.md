@@ -1,15 +1,15 @@
 # Verifier recipes — common shapes for `ask new --verifier`
 
-v1 ships shell verifiers only (the schema reserves `url` and `mcp` types but doesn't implement them). A verifier is a shell command that an agent runs on resume when an item is in `status=resolved`; exit 0 means verified, exit nonzero triggers `reopen` with stdout+stderr captured in `verification_output`.
+v1 ships shell verifiers only (the schema reserves `url` and `mcp` types but doesn't implement them). A verifier is a shell command an agent runs on resume when an item is `status=resolved`; exit 0 means verified, exit nonzero triggers `reopen` with stdout+stderr captured in `verification_output`.
 
-Execution semantics, from the brief:
+Execution semantics:
 
 - cwd is the directory containing `.ask/` (the project root).
 - env is inherited from the calling agent process.
-- `timeout_seconds` is advisory — the agent running the verifier is expected to honor it; ask itself doesn't enforce it in v1.
-- A missing command (script renamed, binary not on `PATH`) exits nonzero and reopens — this is the intended way for stale verifiers to surface back to the human.
+- `timeout_seconds` is advisory — the agent running the verifier honors it; ask doesn't enforce it in v1.
+- A missing command (script renamed, binary not on `PATH`) exits nonzero and reopens — the intended way for stale verifiers to surface back to the human.
 
-Below are the four most common shapes. Each section: when it's the right shape, the recipe, and what to watch out for.
+The four most common shapes follow.
 
 ## 1. Exit-code check on a test or script
 
