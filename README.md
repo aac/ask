@@ -110,6 +110,20 @@ Cowork, the Claude Desktop app, and claude.ai aren't supported hosts yet: they c
 the plugin's MCP server the way the CLI harnesses do. Support for them is a planned
 addition, not a requirement for anything above.
 
+### macOS Gatekeeper
+
+A prebuilt `ask` binary fetched over the network — via the install script or a Release
+tarball — carries macOS's quarantine flag, and Gatekeeper will refuse to run it
+(*"cannot be opened because the developer cannot be verified"*). Codesigning/notarization
+is deferred, so clear the flag once, pointing at wherever the binary landed:
+
+```sh
+xattr -d com.apple.quarantine /usr/local/bin/ask
+```
+
+This doesn't apply when the installer builds from source — a locally built binary is never
+quarantined.
+
 ### Codex without the plugin
 
 For Codex CLI, install the skill from a repo clone — copy `skills/ask/` into
