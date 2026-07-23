@@ -133,6 +133,22 @@ on startup:
 launcher starts it in is the `.ask/` the MCP tools operate on. There is no `--workdir`
 flag. The binary makes no network calls and needs no credentials beyond filesystem access.
 
+### macOS: unblocking a directly-downloaded binary
+
+Installing via the plugin needs no extra step — the binary is delivered by
+`git clone`, which doesn't quarantine files. But if you obtain an `ask` binary
+**directly** (a repo ZIP from GitHub, or a raw `bin/ask-darwin-*` file), macOS
+attaches the `com.apple.quarantine` flag and Gatekeeper blocks the first run
+with a *"cannot be opened because the developer cannot be verified"* error.
+Clear the flag once:
+
+```sh
+xattr -d com.apple.quarantine /path/to/ask
+```
+
+This is a pre-v1 stopgap; the durable fix — codesigning + notarization, which
+drops the prompt entirely — is deferred to a later release.
+
 ### First inbox
 
 Once `ask` is installed (plugin or binary), initialize an inbox in any repo:
