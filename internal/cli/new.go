@@ -21,11 +21,11 @@ func runNew(args []string) int {
 	urgency := fs.String("urgency", "normal", "blocker|normal|fyi")
 	verifier := fs.String("verifier", "", "Shell command to verify resolution")
 	timeout := fs.Int("timeout", 0, "Verifier timeout in seconds (advisory)")
-	tracker := fs.String("tracker-ref", "", "Free-form tracker reference (e.g. act-3c89)")
+	tracker := fs.String("tracker-ref", "", "Backward provenance: the tracker item that motivated this ask (e.g. act-3c89); metadata only, no queue effect. Use --blocks for a blocking relationship")
 	filedBy := fs.String("filed-by", "", "Free-form filer id")
 	recipient := fs.String("recipient", "", "Free-form recipient ref (e.g. agent:data-prep, human:andrew, team:reviewers)")
 	var blocks stringSliceFlag
-	fs.Var(&blocks, "blocks", "Cross-tool ref this ask is blocking (e.g. act-3c89); repeatable")
+	fs.Var(&blocks, "blocks", "Forward edge: a tracker item this ask blocks (e.g. act-3c89); consumed by act ready and ask list --blocks; repeatable")
 	asJSON := fs.Bool("json", false, "Output the new item as JSON")
 	if err := fs.Parse(reorderFlagsFirst(args)); err != nil {
 		return handleParseErr(err, fs, "new",
