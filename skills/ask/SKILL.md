@@ -54,6 +54,8 @@ Save client ID and secret to .env.local as GITHUB_CLIENT_ID and GITHUB_CLIENT_SE
 
 `--blocks` is optional: it names the tracker-issue id (`act-XXXX`) whose work is blocked pending this ask. ask stores it verbatim and never interprets it; the consumer is `ask list --blocks=<id>` and tooling like `act ready`. Omit if the ask maps to no tracker issue.
 
+`--blocks` vs `--tracker-ref`: use `--blocks` for a *blocking* relationship — the issue waits on this ask, and `act ready` hides it until the ask resolves. Use `--tracker-ref` only for a non-blocking back-pointer to the issue that *motivated* the ask (provenance; no queue effect). When in doubt it's `--blocks` — that's the integrated one.
+
 ## Urgency
 
 `blocker | normal | fyi`. Be honest — urgency decides whether the human's day gets interrupted, and a needless `blocker` erodes trust in the signal.
