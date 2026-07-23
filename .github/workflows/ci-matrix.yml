@@ -1,20 +1,27 @@
 name: Release Smoke
 
 # Cross-platform smoke matrix: ensure the ask binary builds and the test
-# suite passes on the shipped developer platforms (linux + macOS).
+# suite passes on the platforms ask actually ships (linux + macOS).
 #
-# windows-latest is REMOVED until its test failures are fixed (act-fb4402):
-# file-locking in TestRunMCPWorkdirChdirs, CRLF/setup issues in the version-stamp
-# tests, etc. Windows support is aspirational, and ask ships no Windows binary
-# (.goreleaser.yml targets darwin + linux), so it does not gate releases for now.
-# Re-add windows-latest here once act-fb4402 lands.
+# Windows is intentionally OUT OF SCOPE (act-fb4402, decided 2026-07-23).
+# The commit-to-main release model builds per-arch binaries via the kit's
+# stage-binaries step, and it produces darwin + linux only (bin/ask-darwin-*,
+# bin/ask-linux-*) — no Windows binary. So the matrix covers exactly the
+# shipped platforms; there is no Windows target to smoke-test. ask is not a
+# supported Windows *developer* platform either. For the record, the Windows
+# test failures that motivated this decision were: TestRunMCPWorkdirChdirs
+# (temp-dir RemoveAll blocked by Windows file locking) and the version-stamp
+# tests (TestInstalledSkillCarriesVersionStamp et al., CRLF / test-setup).
+# Reopen act-fb4402 (and re-add windows-latest here + fix those tests) only
+# if ask ever gains a Windows binary or commits to Windows dev support.
 #
-# Triggered on `v*` tag push only — per-push / per-PR runs were dropped to
-# cut Actions burn. macOS minutes count 10x against the included quota, so
-# running this matrix on every PR was the single largest contributor to
-# billing-cycle exhaustion. Regressions in normal development show up via
-# the plain `ci.yml` job on ubuntu-latest; cross-OS regressions surface at
-# release time.
+# TRIGGER CAVEAT: this workflow is gated on `v*` tag push, but the
+# commit-to-main release model creates no git tags, so it does not currently
+# fire — cross-platform validation at release time is tracked in act-02f257.
+# Until that lands, macOS regressions are not caught automatically; the plain
+# `ci.yml` job runs on every PR / main push but is ubuntu-latest only.
+# (macOS minutes bill 10x against the included quota, which is why this leg
+# was never wired to per-PR runs in the first place.)
 
 on:
   push:
