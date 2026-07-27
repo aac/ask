@@ -15,22 +15,47 @@ name: Release Smoke
 # Reopen act-fb4402 (and re-add windows-latest here + fix those tests) only
 # if ask ever gains a Windows binary or commits to Windows dev support.
 #
-# TRIGGER CAVEAT: this workflow is gated on `v*` tag push, but the
-# commit-to-main release model creates no git tags, so it does not currently
-# fire — cross-platform validation at release time is tracked in act-02f257.
-# Until that lands, macOS regressions are not caught automatically; the plain
-# `ci.yml` job runs on every PR / main push but is ubuntu-latest only.
-# (macOS minutes bill 10x against the included quota, which is why this leg
-# was never wired to per-PR runs in the first place.)
+# TRIGGER: fires after the `Release` workflow (.github/workflows/release.yml)
+# completes successfully. Under the commit-to-main release model a release IS a
+# `workflow_dispatch` of that workflow, which ends with the kit committing the
+# version bump + rebuilt binaries to the default branch — there is no tag to key
+# off, so `workflow_run` is the only event that actually coincides with a real
+# release. (This replaces a dead `push: tags: v*` gate that never fired once:
+# the repo has zero tags.)
+#
+# Why not `push` on the release commit: the kit commits as `github-actions[bot]`
+# using the default GITHUB_TOKEN, and pushes made with GITHUB_TOKEN do not
+# trigger new workflow runs. A paths-filtered `push` gate on the manifests would
+# look correct and silently never fire — the same class of bug this replaces.
+#
+# This is a post-release smoke, not a pre-release gate: the kit commits to the
+# default branch itself, so nothing can block that commit from here. A red run
+# means the just-released state is broken on a shipped platform and wants a
+# follow-up release, not a rollback of a tag that doesn't exist.
+#
+# `workflow_dispatch` is kept alongside so the matrix can be exercised on demand
+# — both to verify this wiring without cutting a release and to smoke a branch
+# before releasing it. macOS minutes bill 10x against the included quota, which
+# is why this leg is still not wired to per-PR runs; `ci.yml` covers every PR /
+# main push but is ubuntu-latest only.
+#
+# NOTE: `workflow_run` only fires for the copy of this file on the default
+# branch, so this trigger is inert until merged to main.
 
 on:
-  push:
-    tags:
-      - 'v*'
+  workflow_run:
+    workflows: [Release]
+    types: [completed]
+  workflow_dispatch:
 
 permissions:
   contents: read
 
+# Under the old tag trigger github.ref was unique per release, so this group
+# never actually collapsed. Under workflow_run it is always the default branch,
+# so back-to-back releases now share a group and the newer smoke cancels the
+# older — which is what we want: every run validates current default-branch
+# head, so an in-flight run against a superseded state has no value.
 concurrency:
   group: release-smoke-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -38,12 +63,20 @@ concurrency:
 jobs:
   build:
     name: build (${{ matrix.os }})
+    # A failed/cancelled Release left nothing new on the default branch, so there
+    # is nothing to smoke. Manual dispatches always run.
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
     steps:
+      # No explicit `ref`: under workflow_run the default checkout is already the
+      # default branch's head — i.e. the release commit the kit just pushed — and
+      # under workflow_dispatch it is the ref that was dispatched. Do NOT "fix"
+      # this to github.event.workflow_run.head_sha: that is the SHA the Release
+      # run *started* from, the commit BEFORE the version bump and binary refresh.
       - name: Checkout
         uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4
 
