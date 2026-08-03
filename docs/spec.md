@@ -147,6 +147,28 @@ A single Item object. If the id is not found, no JSON is emitted; exit code 3 wi
 - Without `--json`: prints a one-line summary to stdout, e.g. `ask-3c89: open -> resolved`. On idempotent no-op (already in target state): prints `ask-3c89: already resolved` to stdout AND a warning to stderr, exit code 6 (§2).
 - With `--json`: prints the post-transition Item object. On idempotent no-op, prints the unchanged Item object and the warning still goes to stderr; exit code 6.
 
+### 1.8.1 `ask update`
+
+`ask update <id>` corrects an item's `title` and/or `body` in place. It makes **no** state transition and stamps no lifecycle timestamps: an ask that still needs a human stays `open` while its wording is fixed. It is allowed on items in any status — correcting the record of something already closed is not a state change.
+
+Flags (the body flags are mutually exclusive; supplying more than one is a validation error, exit 2):
+
+| Flag | Meaning |
+|---|---|
+| `--title=<text>` | Replace the title. Same validation as `ask new`: non-empty after trim, 1..200 chars, no newlines. Leading/trailing whitespace is trimmed. |
+| `--body=<text>` | Replace the body. An explicitly supplied empty string (`--body ""`) clears it; an omitted flag leaves it alone. |
+| `--body-file=<path>` | Replace the body with the UTF-8 contents of `path`. `-` reads stdin. |
+| `--body-append=<text>` | Append to the existing body, separated by a blank line. An empty existing body yields the addition alone (no leading blank line). |
+| `--body-append-file=<path>` | As `--body-append`, reading the text from `path` (`-` = stdin). |
+
+Names mirror `act update` (`--description` / `--description-append` / `--description-file`) so the sibling tools stay learnable together; ask's field is `body`, so the flags follow the field.
+
+Invoking with an id but no field flag is a validation error (exit 2) — `ask update` never has a "do nothing" success.
+
+- Without `--json`: prints `ask-3c89: updated` to stdout.
+- With `--json`: prints the updated Item object.
+- Idempotent no-op: when the requested text is already exactly what is on disk, no write happens (the item's mtime is untouched), stdout still emits the success shape with `unchanged` in place of `updated`, a warning goes to stderr, and the exit code is 6 (§2) — the same envelope as §1.8.
+
 ### 1.9 `ask version`
 
 Prints `BinaryVersion` (a single line) to stdout. No `--json` variant in v1.
@@ -177,6 +199,7 @@ The full taxonomy. Every CLI invocation returns exactly one of these.
 | `4` | Ambiguous id prefix | id prefix matches >1 items |
 | `5` | I/O / disk error | cannot read/write `.ask/`, corrupt `config.json` (§7), atomic-rename failure, no `.ask/` present when one is required (run `ask init` first) |
 | `6` | Already-handled idempotent no-op | `resolve` on a `resolved` item, `close` on a `closed` item, `reopen` on an `open` item, `ask init` in an already-initialized directory when no fields would change. Always paired with a stderr warning. Stdout still emits the success-shape (id or item) so scripts can pipe results uniformly. |
+| `7` | Stranded store | `.ask/config.json` is absent but `.ask/items/` holds item files (§7). Distinct from `5` so a consumer can tell "no inbox here" from "an unreachable inbox holding N asks" without inspecting `.ask/items/` itself. `ask init` in that directory is the repair; it adopts the existing items. |
 
 Notes:
 
@@ -416,7 +439,7 @@ On any non-success outcome, the tool returns:
 }
 ```
 
-- `code` is the exit-code taxonomy value (§2): 2/3/4/5/6.
+- `code` is the exit-code taxonomy value (§2): 2/3/4/5/6/7.
 - `message` is the same human-readable string the CLI would have printed to stderr.
 - Idempotent no-ops (code 6) are returned as `isError: false` with the item payload **and** an additional `content` text element containing the warning, mirroring the CLI's stdout-success-plus-stderr-warning pattern. (Justification: an MCP-side warning that arrives as `isError: true` is the wrong affordance — the call succeeded.) Concretely:
   - The `content` array has exactly two entries, both `type: "text"`.
@@ -472,13 +495,26 @@ Detected conditions:
 
 Behavior:
 
-- Exit code 5.
+- Exit code 5 — except the missing-`config.json`-with-items-present case, which is exit 7 (§7.1).
 - Stderr message names the file and the failure reason, e.g.:
   - `ask: cannot read .ask/config.json: no such file or directory (run 'ask init')`
   - `ask: .ask/config.json is invalid JSON: unexpected EOF`
   - `ask: .ask/config.json missing required field "project_id"`
   - `ask: .ask/config.json has invalid project_id (expected ULID)`
 - No file is written. No item is touched. No auto-recovery is attempted in v1.
+
+### 7.1 Missing `config.json` with items present (stranded store)
+
+The "file does not exist" condition above splits in two, and the split is load-bearing:
+
+- `.ask/items/` holds no item files → the directory is not a store. Exit **5**, message `ask not initialized at <dir> (run 'ask init')`.
+- `.ask/items/` holds one or more item files → the store is **stranded**: those asks are real, still want a human, and are unreachable until the config is restored. Exit **7**, with a message naming the directory and the item count, e.g. `.ask/config.json is missing but .ask/items/ holds 4 item file(s): this store is stranded, not empty (run 'ask init' here to restore access; items are preserved)`.
+
+Reporting both cases identically is how a full inbox gets counted as zero by anything sweeping for `.ask` directories. Consumers branch on the exit code, not on the English.
+
+### 7.2 Reads never create a store
+
+Opening a store for a read (any verb other than `ask init`) is **non-mutating**: no `.ask/` and no `.ask/items/` is created, whether the open succeeds or fails. Only `ask init` creates `.ask/`, and only the first item write creates `.ask/items/`. A read that fails must leave the directory exactly as it found it — otherwise a single `ask list` in the wrong directory enrols it permanently as a store-shaped husk that later sweeps cannot distinguish from a real one.
 
 Item files (`.ask/items/ask-XXXX.json`) follow the same policy individually: a corrupt item file makes that one id unreadable (`ask show ask-XXXX` → exit 5, `ask list` skips it and emits a stderr warning per skipped id but continues with the rest, exit 0 if at least one item was readable, exit 5 only if every requested item was unreadable). The skip-and-warn behavior is the only deviation from "no auto-recovery"; it is necessary so that one bad file does not lock the entire inbox.
 
@@ -629,7 +665,7 @@ To keep post-v1 changes additive rather than breaking:
 
 - **Item schema:** new fields must default to `null` or `[]` and must not change the meaning of existing fields. v1 parsers should ignore unknown fields on read (`json.Decoder` without `DisallowUnknownFields`). The `schema_version` field (§1.1.1) is the migration hook for any change that *can't* be expressed as a pure additive field — bump it and treat the old value as legacy on the read path.
 - **`config.json`:** same. New fields default to absent-tolerant values.
-- **Exit codes:** the taxonomy in §2 is closed; new error classes get new codes (`7`, `8`, ...) rather than reusing existing ones with new semantics.
+- **Exit codes:** the taxonomy in §2 is closed; new error classes get new codes (`8`, `9`, ...) rather than reusing existing ones with new semantics. (`7` was added this way for the stranded-store case, §7.1.)
 - **MCP tools:** new tools are additive. Existing tools' `inputSchema` may grow optional properties; required properties cannot change. Response shape changes are breaking and require a wire-version bump.
 - **CLI flags:** new flags must be optional. Renaming an existing flag is breaking and requires a major-version bump.
 

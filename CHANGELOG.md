@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `ask update <id>` corrects an item's text in place: `--title`, `--body`,
+  `--body-file <path|->`, `--body-append`, `--body-append-file <path|->`. Flag names
+  mirror `act update` so the sibling tools stay learnable together. It makes no state
+  transition — an open ask stays open while its wording is fixed — which removes the two
+  bad workarounds for a rotted ask: editing `.ask/items/<id>.json` by hand, and
+  resolve-and-refile (which closes something nobody has done). Requesting text the item
+  already has is an idempotent no-op: exit 6, no write.
+- Exit code **7**, "stranded store": `.ask/config.json` is absent but `.ask/items/` holds
+  item files. Previously indistinguishable from an uninitialized directory (both exit 5,
+  same message), so an inbox full of open asks could be swept up and counted as zero.
+  Surfaced on the CLI and in the MCP error envelope; `ask init` in that directory is the
+  repair and adopts the existing items.
+
+### Fixed
+- A failed read no longer mutates the filesystem. `OpenStore` created `.ask/items/` before
+  checking for `config.json`, so `ask list` in a directory with no store created a
+  store-shaped husk there and *then* errored. Those husks are indistinguishable from real
+  stores to anything scanning for `.ask` directories, so one stray read permanently
+  enrolled a repo in every future sweep. `.ask/` is now created only by `ask init`, and
+  `.ask/items/` only by the first item write.
+- `--body-file -` / `--body-append-file -` (and any future `-`-valued flag) now parse
+  correctly when the flag precedes the id; the flag reorderer treated a bare `-` as the
+  start of another flag and swallowed the id as the flag's value.
+
 ## [0.2.1]
 
 ### Fixed

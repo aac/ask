@@ -80,6 +80,14 @@ ask is human-recipient by default; items without `--recipient` target the implic
 
 `ask resolve` on an already-resolved item, `ask close` on an already-closed one, and `ask reopen` on an item not in `resolved` succeed as no-ops with exit code 6 (plus a stderr warning; the normal stdout payload is still emitted). Scripts under `set -e` should treat 6 as success (equivalent to 0).
 
+## Correcting an ask that's still open
+
+An ask whose text has rotted — a relative date that no longer means anything, a path that moved, a decision that landed since — gets **corrected**, not closed. `ask update <id> --body-append "2026-08-02: still open; 'tomorrow' meant 2026-05-14"` appends a dated note to the body in one command, leaving status, timestamps and every other field alone. `--title`, `--body` (replace), `--body-file` and `--body-append-file` (`-` = stdin) are there too, and the flags mirror `act update`.
+
+Two things not to do: don't edit `.ask/items/<id>.json` by hand (the store's one-file-per-item shape makes it look safe, and a format change breaks every habit built on it), and never resolve-and-refile an ask that still needs the human — that destroys the item's history and closes something nobody has done.
+
+Prefer relative-date-free wording when filing, so corrections are rarer: write `2026-08-02` rather than "tomorrow".
+
 ## Dispatching subagents (surface-via-report)
 
 "Subagent" = any dispatched, isolated run: a worktree agent, a remote dev environment (sculptor, Codespaces, Coder), a CI job. Its `.ask/` is its own — invisible to the human, who runs `ask list` elsewhere. So **subagents surface; orchestrators file.**

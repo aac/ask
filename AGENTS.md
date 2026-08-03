@@ -35,7 +35,9 @@ rules, and move it when you find it misfiled:
   The tracked `bin/` contents are produced by the release pipeline (CI cross-compiles,
   stamps, and commits them at release time via `stage-binaries`) — see Releasing below.
 - **MCP is implemented in-tree** (no external library), following the in-binary server
-  pattern — the MCP tools mirror the CLI one-to-one (`ask_new`, `ask_list`, …).
+  pattern — the MCP tools mirror the CLI's lifecycle verbs (`ask_new`, `ask_list`, …).
+  `init`, `harvest` and `update` are CLI-only; adding an MCP twin is a deliberate call per
+  verb, not an automatic consequence of adding a subcommand.
 - **This repo dogfoods ask on its own backlog.** Mid-flight discoveries about ask itself are
   common; file them and keep working — that's the dogfood signal.
 - **The skill tree is plain files at `skills/ask/`**, shipped with the plugin and
