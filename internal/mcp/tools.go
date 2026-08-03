@@ -8,6 +8,7 @@
 //   - Id prefix matched zero items                       → code 3.
 //   - Id prefix matched >1 items                         → code 4.
 //   - I/O failure (open store, read/write items)         → code 5.
+//   - Store stranded: items present, config.json gone     → code 7.
 //   - Idempotent no-op (resolve on resolved, close on closed, reopen on
 //     open) → isError=false with two content parts: the unchanged Item
 //     payload, followed by a `ask <verb>: already <status>` warning
@@ -258,7 +259,7 @@ func callNew(repoRoot string, raw json.RawMessage) (string, bool) {
 
 	store, err := core.OpenStore(repoRoot, nil)
 	if err != nil {
-		return encodeErr(5, "ask new: "+err.Error()), true
+		return encodeErr(storeErrCode(err), "ask new: "+err.Error()), true
 	}
 	now := time.Now().UTC()
 	existing, err := store.ListIDs()
@@ -361,7 +362,7 @@ func callList(repoRoot string, raw json.RawMessage) (string, bool) {
 	}
 	store, err := core.OpenStore(repoRoot, nil)
 	if err != nil {
-		return encodeErr(5, "ask list: "+err.Error()), true
+		return encodeErr(storeErrCode(err), "ask list: "+err.Error()), true
 	}
 	items, err := store.List()
 	if err != nil {
@@ -573,7 +574,7 @@ func mutate(repoRoot, verb string, raw json.RawMessage, fn func(idArgs, *core.It
 func resolveID(repoRoot, verb, raw string) (*core.FileStore, string, int, string, bool) {
 	store, err := core.OpenStore(repoRoot, nil)
 	if err != nil {
-		return nil, "", 5, fmt.Sprintf("ask %s: %s", verb, err.Error()), false
+		return nil, "", storeErrCode(err), fmt.Sprintf("ask %s: %s", verb, err.Error()), false
 	}
 	ids, err := store.ListIDs()
 	if err != nil {
@@ -591,4 +592,17 @@ func resolveID(repoRoot, verb, raw string) (*core.FileStore, string, int, string
 		}
 	}
 	return store, full, 0, "", true
+}
+
+// storeErrCode maps a core.OpenStore failure to the §2 exit-code taxonomy
+// value carried in the MCP error envelope: 7 when the store is stranded
+// (item files present, config.json gone — those asks are real and still
+// want a human), 5 for every other open failure including a genuinely
+// uninitialized directory (act-55ae5b).
+func storeErrCode(err error) int {
+	var stranded *core.StrandedStoreError
+	if errors.As(err, &stranded) {
+		return 7
+	}
+	return 5
 }

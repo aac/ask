@@ -14,6 +14,7 @@ Commands:
   new            File a new request.
   list           List items in this project.
   show           Show one item's full detail.
+  update         Correct an item's title or body (no state change).
   resolve        Mark an item resolved (typically called by an agent).
   reopen         Reopen a resolved item (verifier failed).
   close          Close an item (final, or cancel/dismiss from open).

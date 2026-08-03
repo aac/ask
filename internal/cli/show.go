@@ -40,15 +40,9 @@ func runShow(args []string) int {
 		return 2
 	}
 
-	cwd, err := os.Getwd()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "ask show: %v\n", err)
-		return 5
-	}
-	store, err := core.OpenStore(cwd, nil)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "ask show: %v\n", err)
-		return 5
+	store, code := openStoreCwd("show")
+	if code != 0 {
+		return code
 	}
 
 	ids, err := store.ListIDs()

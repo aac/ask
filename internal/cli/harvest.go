@@ -57,20 +57,13 @@ func runHarvest(args []string) int {
 		return 2
 	}
 
-	cwd, err := os.Getwd()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "ask harvest: %v\n", err)
-		return 5
+	target, code := openStoreCwd("harvest")
+	if code != 0 {
+		return code
 	}
-	target, err := core.OpenStore(cwd, nil)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "ask harvest: %v\n", err)
-		return 5
-	}
-	source, err := core.OpenStore(*from, nil)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "ask harvest: source: %v\n", err)
-		return 5
+	source, code := openStore("harvest: source", *from)
+	if code != 0 {
+		return code
 	}
 
 	// Refuse to harvest a store into itself (EvalSymlinks-resolved equality).

@@ -62,8 +62,9 @@ func reorderFlagsFirst(args []string) []string {
 			// token follows (i.e. not another flag), greedily consume it.
 			// This isn't perfect for boolean flags whose next token starts
 			// with `-` (rare in our surface), but it covers --note/--reason
-			// cleanly.
-			if !strings.Contains(a, "=") && i+1 < len(args) && (len(args[i+1]) == 0 || args[i+1][0] != '-') {
+			// cleanly. A bare `-` is the conventional stdin sentinel
+			// (`--body-file -`), never a flag, so it counts as a value.
+			if !strings.Contains(a, "=") && i+1 < len(args) && (len(args[i+1]) == 0 || args[i+1] == "-" || args[i+1][0] != '-') {
 				flags = append(flags, args[i+1])
 				i++
 			}
@@ -90,15 +91,9 @@ func mutate(verb string, args []string, asJSON bool, fn func(*core.Item) error) 
 		fmt.Fprintf(os.Stderr, "ask %s: id required\n", verb)
 		return 2
 	}
-	cwd, err := os.Getwd()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "ask %s: %v\n", verb, err)
-		return 5
-	}
-	store, err := core.OpenStore(cwd, nil)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "ask %s: %v\n", verb, err)
-		return 5
+	store, code := openStoreCwd(verb)
+	if code != 0 {
+		return code
 	}
 	ids, err := store.ListIDs()
 	if err != nil {

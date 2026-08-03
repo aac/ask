@@ -78,10 +78,21 @@ $ ask resolve ask-3c89 && pnpm test:gmail-auth && ask close ask-3c89
 `ask` is the state store. The agent decides when to file, when to verify, what to do on
 failure; `ask` enforces the state machine and stays out of the way.
 
+When an ask outlives its own wording — a relative date that stopped meaning anything, a
+path that moved — correct it rather than closing it:
+
+```sh
+$ ask update ask-3c89 --body-append "2026-08-02: still open; the console URL moved to /apis/credentials"
+ask-3c89: updated
+```
+
+`ask update` changes only `title`/`body`; it makes no state transition, so an ask that
+still needs a human stays open.
+
 ## How agents use this
 
 `ask` exposes its full surface as an [MCP](https://modelcontextprotocol.io) server
-(`ask mcp`, stdio transport). MCP tools mirror the CLI one-to-one — `ask_new`, `ask_list`,
+(`ask mcp`, stdio transport). MCP tools cover the lifecycle verbs — `ask_new`, `ask_list`,
 `ask_resolve`, `ask_reopen`, `ask_close`, `ask_show` — so any MCP-aware agent (Claude Code,
 Codex, custom SDK apps) can drive the loop through tool calls instead of shelling out. The
 CLI is always available as the base surface: every operation is an `ask` subcommand, so any

@@ -34,6 +34,19 @@ Transition verbs
                              recommended in that case and populates
                              resolution_note.
 
+Text correction (no transition)
+  ask update <id> [--title] [--body | --body-file <path|->]
+             [--body-append <text> | --body-append-file <path|->]
+                             Correct an item's title or body in place.
+                             Status, timestamps and every other field are
+                             untouched — an open ask stays open while its
+                             wording is fixed. --body-append adds a dated
+                             status correction to the end of the body,
+                             separated by a blank line; prefer it to
+                             rewriting what was true when the ask was
+                             filed. Never resolve-and-refile an ask that
+                             still needs the human just to fix its text.
+
 Cross-store move
   ask harvest --from <path>  Copy every item under <path>/.ask/items/
                              into the current store. Used by orchestrators

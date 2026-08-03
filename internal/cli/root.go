@@ -12,6 +12,7 @@ var commands = map[string]commandFunc{
 	"new":     runNew,
 	"list":    runList,
 	"show":    runShow,
+	"update":  runUpdate,
 	"resolve": runResolve,
 	"reopen":  runReopen,
 	"close":   runClose,
