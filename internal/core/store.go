@@ -26,29 +26,68 @@ const (
 	configFile  = "config.json"
 )
 
+// ErrNotInitialized is returned by OpenStore when a read-path open (cfg
+// nil) finds no .ask/config.json and no item files to speak of: this
+// directory simply is not an ask store. The CLI maps it to exit 5 (spec
+// §2).
+var ErrNotInitialized = errors.New("ask not initialized")
+
+// StrandedStoreError is returned by OpenStore when a read-path open finds
+// no .ask/config.json but .ask/items/ does hold item files. That store is
+// not empty — it holds ItemCount asks nobody can reach until the config is
+// restored — so it must not present as "not initialized" (spec §2, exit 7;
+// act-55ae5b). Consumers branch on the exit code, not on the message.
+type StrandedStoreError struct {
+	// Root is the project directory containing the stranded .ask/.
+	Root string
+	// ItemCount is the number of .ask/items/*.json files found.
+	ItemCount int
+}
+
+func (e *StrandedStoreError) Error() string {
+	return fmt.Sprintf(
+		"%s/.ask/config.json is missing but .ask/items/ holds %d item file(s): "+
+			"this store is stranded, not empty (run 'ask init' here to restore access; items are preserved)",
+		e.Root, e.ItemCount)
+}
+
 // OpenStore creates or opens an .ask/ directory at projectRoot. projectRoot
 // is the directory that contains (or should contain) .ask/.
 //
+// A read-path open (cfg nil) never mutates the filesystem: it stats
+// config.json first and returns an error without creating .ask/ or
+// .ask/items/. Creating a store is exclusively the job of the write path
+// below, so a failed read can no longer leave a husk behind that later
+// scans mistake for a real store (act-55ae5b).
+//
 // First-open path: if .ask/config.json does not exist, the caller-supplied
-// cfg is written verbatim. The caller (e.g. `ask init`) is responsible for
-// composing cfg with a fresh ULID project_id and the desired display_name.
-// If cfg is nil on this path, OpenStore returns a "not initialized" error
-// — the store will not invent a config.
+// cfg is written verbatim (creating .ask/items/ along the way). The caller
+// (e.g. `ask init`) is responsible for composing cfg with a fresh ULID
+// project_id and the desired display_name. If cfg is nil on this path,
+// OpenStore returns ErrNotInitialized (empty/absent store) or
+// *StrandedStoreError (items present, config gone) — the store will not
+// invent a config.
 //
 // Subsequent-open path: if .ask/config.json exists, cfg is ignored and the
 // on-disk config is loaded and validated as JSON. A corrupt config.json
 // returns an error (mapped to CLI exit code 5 in the caller, per spec §7).
 func OpenStore(projectRoot string, cfg *ProjectConfig) (*FileStore, error) {
 	askPath := filepath.Join(projectRoot, askDir)
-	if err := os.MkdirAll(filepath.Join(askPath, itemsSubdir), 0o755); err != nil {
-		return nil, fmt.Errorf("create %s: %w", askPath, err)
-	}
+	itemsPath := filepath.Join(askPath, itemsSubdir)
 	cfgPath := filepath.Join(askPath, configFile)
 	_, statErr := os.Stat(cfgPath)
 	switch {
 	case errors.Is(statErr, os.ErrNotExist):
 		if cfg == nil {
-			return nil, fmt.Errorf("ask not initialized at %s (run 'ask init')", projectRoot)
+			// Read path. Nothing below this point writes: distinguish a
+			// stranded store from an absent one and return.
+			if n := countItemFiles(itemsPath); n > 0 {
+				return nil, &StrandedStoreError{Root: projectRoot, ItemCount: n}
+			}
+			return nil, fmt.Errorf("%w at %s (run 'ask init')", ErrNotInitialized, projectRoot)
+		}
+		if err := os.MkdirAll(itemsPath, 0o755); err != nil {
+			return nil, fmt.Errorf("create %s: %w", askPath, err)
 		}
 		b, err := json.MarshalIndent(cfg, "", "  ")
 		if err != nil {
@@ -100,6 +139,35 @@ func (s *FileStore) itemPath(id string) string {
 	return filepath.Join(s.root, itemsSubdir, id+".json")
 }
 
+// isItemFile reports whether a directory entry under .ask/items/ is one of
+// our per-item JSON files. Directories, non-.json entries, and .tmp
+// leftovers from an interrupted atomic write are not.
+func isItemFile(e os.DirEntry) bool {
+	if e.IsDir() {
+		return false
+	}
+	name := e.Name()
+	return strings.HasSuffix(name, ".json") && !strings.HasSuffix(name, ".tmp")
+}
+
+// countItemFiles returns the number of per-item JSON files in itemsPath. A
+// missing or unreadable directory counts as zero — this is a diagnostic
+// used to classify a config-less .ask/, not a load path, so it reports "no
+// items to strand" rather than failing.
+func countItemFiles(itemsPath string) int {
+	entries, err := os.ReadDir(itemsPath)
+	if err != nil {
+		return 0
+	}
+	n := 0
+	for _, e := range entries {
+		if isItemFile(e) {
+			n++
+		}
+	}
+	return n
+}
+
 // Save writes item to .ask/items/<id>.json atomically. The Item is written
 // as-is except for SchemaVersion: a zero value is upgraded to
 // CurrentSchemaVersion in-place so every item on disk carries the field
@@ -114,6 +182,13 @@ func (s *FileStore) Save(item *Item) error {
 	b, err := json.MarshalIndent(item, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal item %s: %w", item.ID, err)
+	}
+	// Create .ask/items/ here rather than in OpenStore: opening a store is
+	// a read and must not touch the filesystem (act-55ae5b), so the first
+	// write is what materializes the directory.
+	itemsPath := filepath.Join(s.root, itemsSubdir)
+	if err := os.MkdirAll(itemsPath, 0o755); err != nil {
+		return fmt.Errorf("create %s: %w", itemsPath, err)
 	}
 	return atomicWrite(s.itemPath(item.ID), b)
 }
@@ -140,26 +215,25 @@ func (s *FileStore) Load(id string) (*Item, error) {
 // from filenames. Order is filesystem-defined (i.e. unspecified); callers
 // that need a deterministic order should sort, or use List which sorts by
 // the spec §3.2 default ordering.
+// A missing .ask/items/ directory is not an error: a store whose config
+// exists but which has never been written to is legitimately empty, and
+// reads must not create the directory to find that out (act-55ae5b).
 func (s *FileStore) ListIDs() ([]string, error) {
 	entries, err := os.ReadDir(filepath.Join(s.root, itemsSubdir))
+	if errors.Is(err, os.ErrNotExist) {
+		return []string{}, nil
+	}
 	if err != nil {
 		return nil, fmt.Errorf("read items dir: %w", err)
 	}
 	ids := make([]string, 0, len(entries))
 	for _, e := range entries {
-		if e.IsDir() {
+		// Skips directories, non-.json entries, and .tmp leftovers from an
+		// interrupted atomic write.
+		if !isItemFile(e) {
 			continue
 		}
-		name := e.Name()
-		if !strings.HasSuffix(name, ".json") {
-			continue
-		}
-		// Skip in-flight atomic writes (<id>.json.tmp would not end in .json,
-		// but be defensive about any other .tmp-flavoured leftovers).
-		if strings.HasSuffix(name, ".tmp") {
-			continue
-		}
-		ids = append(ids, strings.TrimSuffix(name, ".json"))
+		ids = append(ids, strings.TrimSuffix(e.Name(), ".json"))
 	}
 	return ids, nil
 }

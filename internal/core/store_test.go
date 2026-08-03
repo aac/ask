@@ -1,8 +1,12 @@
 package core
 
 import (
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"reflect"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -268,4 +272,116 @@ func TestOpenStoreUninitializedNoCfg(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error opening uninitialized store with nil cfg, got nil")
 	}
+}
+
+// TestOpenStoreReadPathDoesNotMutate is the regression guard for
+// act-55ae5b: a failed read must leave the directory byte-for-byte as it
+// found it. The old OpenStore ran MkdirAll before checking for
+// config.json, so `ask list` in a directory with no store created
+// .ask/items/ there — a husk indistinguishable from a real store to
+// anything scanning for .ask directories.
+func TestOpenStoreReadPathDoesNotMutate(t *testing.T) {
+	dir := t.TempDir()
+	before := treeOf(t, dir)
+
+	_, err := OpenStore(dir, nil)
+	if err == nil {
+		t.Fatal("expected error opening uninitialized store with nil cfg, got nil")
+	}
+	if !errors.Is(err, ErrNotInitialized) {
+		t.Fatalf("want ErrNotInitialized, got %v", err)
+	}
+
+	after := treeOf(t, dir)
+	if !reflect.DeepEqual(before, after) {
+		t.Fatalf("read mutated the filesystem: before=%v after=%v", before, after)
+	}
+}
+
+// TestOpenStoreStrandedStore covers the second half of act-55ae5b: a
+// directory whose .ask/items/ holds real items but whose config.json is
+// gone is NOT "not initialized" — those asks still want a human, and a
+// consumer must be able to tell the two apart without reading
+// .ask/items/ itself.
+func TestOpenStoreStrandedStore(t *testing.T) {
+	dir := t.TempDir()
+	store, err := OpenStore(dir, &ProjectConfig{ProjectID: "p1", DisplayName: "t", CreatedAt: time.Now()})
+	if err != nil {
+		t.Fatalf("OpenStore: %v", err)
+	}
+	for _, id := range []string{"ask-1111", "ask-2222"} {
+		if err := store.Save(NewItem(id, "t", UrgencyNormal, StatusOpen, time.Now())); err != nil {
+			t.Fatalf("Save: %v", err)
+		}
+	}
+	if err := os.Remove(filepath.Join(dir, ".ask", "config.json")); err != nil {
+		t.Fatalf("remove config: %v", err)
+	}
+
+	_, err = OpenStore(dir, nil)
+	var stranded *StrandedStoreError
+	if !errors.As(err, &stranded) {
+		t.Fatalf("want *StrandedStoreError, got %v", err)
+	}
+	if stranded.ItemCount != 2 {
+		t.Fatalf("item count: want 2, got %d", stranded.ItemCount)
+	}
+	if errors.Is(err, ErrNotInitialized) {
+		t.Fatal("a stranded store must not report as ErrNotInitialized")
+	}
+	if !strings.Contains(err.Error(), "stranded") {
+		t.Fatalf("message should name the condition, got %q", err.Error())
+	}
+}
+
+// TestListIDsToleratesMissingItemsDir: because opening a store no longer
+// creates .ask/items/, a freshly-initialized store that has never been
+// written to has no items directory. Listing it is empty, not an error.
+func TestListIDsToleratesMissingItemsDir(t *testing.T) {
+	dir := t.TempDir()
+	store, err := OpenStore(dir, &ProjectConfig{ProjectID: "p1", DisplayName: "t", CreatedAt: time.Now()})
+	if err != nil {
+		t.Fatalf("OpenStore: %v", err)
+	}
+	if err := os.RemoveAll(filepath.Join(dir, ".ask", "items")); err != nil {
+		t.Fatalf("remove items: %v", err)
+	}
+	ids, err := store.ListIDs()
+	if err != nil {
+		t.Fatalf("ListIDs with no items dir: %v", err)
+	}
+	if len(ids) != 0 {
+		t.Fatalf("want no ids, got %v", ids)
+	}
+	// The first write recreates the directory.
+	if err := store.Save(NewItem("ask-3333", "t", UrgencyNormal, StatusOpen, time.Now())); err != nil {
+		t.Fatalf("Save after items dir removed: %v", err)
+	}
+	ids, err = store.ListIDs()
+	if err != nil || len(ids) != 1 {
+		t.Fatalf("after Save: ids=%v err=%v", ids, err)
+	}
+}
+
+// treeOf returns every path under root, relative and sorted, so a test can
+// assert an operation left the filesystem unchanged.
+func treeOf(t *testing.T, root string) []string {
+	t.Helper()
+	var out []string
+	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(root, p)
+		if err != nil {
+			return err
+		}
+		out = append(out, rel)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk %s: %v", root, err)
+	}
+	sort.Strings(out)
+	return out
 }

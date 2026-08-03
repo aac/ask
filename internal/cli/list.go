@@ -88,15 +88,9 @@ func runList(args []string) int {
 		}
 	}
 
-	cwd, err := os.Getwd()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "ask list: %v\n", err)
-		return 5
-	}
-	store, err := core.OpenStore(cwd, nil)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "ask list: %v\n", err)
-		return 5
+	store, code := openStoreCwd("list")
+	if code != 0 {
+		return code
 	}
 	items, err := store.List()
 	if err != nil {
