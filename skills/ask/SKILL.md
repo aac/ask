@@ -41,6 +41,7 @@ Rules:
 - One ask per discrete action. Two distinct human steps (set up OAuth *and* invite a bot) are two asks unless truly atomic.
 - Put enough in `body` that a future agent — not the filer — can act on the resolution: URLs, file paths, env-var names, expected outcomes.
 - Don't file what you can resolve yourself. If you can write the file, run the command, hit the API — do it. ask is for the boundary you literally cannot cross.
+- **Don't file what *any* agent could do — check for an agent arm before filing.** "I can't do this from here" is not "no agent can do this": another machine may hold the credential, the tool, or the network path. Before filing, state why no agent in reach can take the action. If one could, it belongs in the tracker as agent work naming that target, not in the human queue. A body containing a runnable command is the signature of this mistake — file the runnable part as tracked work and keep an ask only for the residue that genuinely needs a human.
 
 Minimal invocation (only `title` and `--body` required):
 

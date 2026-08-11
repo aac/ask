@@ -21,6 +21,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Surfaced on the CLI and in the MCP error envelope; `ask init` in that directory is the
   repair and adopts the existing items.
 
+### Changed
+- The skill's filing rules now carry a **has-agent-arm check**: before filing, state why no
+  agent in reach can take the action. "I can't do this from here" is not "no agent can do
+  this" — another machine may hold the credential, the tool, or the network path — and a body
+  containing a runnable command is the signature of an item that belongs in a tracker, not in
+  a human's inbox.
+
 ### Fixed
 - A failed read no longer mutates the filesystem. `OpenStore` created `.ask/items/` before
   checking for `config.json`, so `ask list` in a directory with no store created a
