@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `ask version` distinguishes builds. Without an `-ldflags` stamp it now prints
+  `dev+<commit>[.dirty] <commit time>` from the build info Go embeds in every build from a
+  checkout, instead of the bare `dev` — so a stale install is visible from the binary itself.
+  Release builds still print their stamp; MCP `serverInfo.version` reports the same string.
+- `ask new` warns (never refuses) when the title or body uses relative-date language —
+  `tomorrow`, `next week`, `in 3 days`, a bare `Monday` — and names the absolute date it
+  resolves to at filing time, e.g. `"Tomorrow" ... (Tomorrow = 2026-09-26)`. Asks are read
+  long after they are filed; "Tomorrow: run the dogfood" once sat for 63 days.
 - `ask update <id>` corrects an item's text in place: `--title`, `--body`,
   `--body-file <path|->`, `--body-append`, `--body-append-file <path|->`. Flag names
   mirror `act update` so the sibling tools stay learnable together. It makes no state
