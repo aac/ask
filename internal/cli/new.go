@@ -133,6 +133,11 @@ func runNew(args []string) int {
 		return 5
 	}
 
+	// Warn, never refuse: see datelint.go (act-d54808).
+	for _, w := range relativeDateWarnings(title+"\n"+*body, time.Now()) {
+		fmt.Fprintf(os.Stderr, "ask new: warning: %s\n", w)
+	}
+
 	if *asJSON {
 		emitJSON(item)
 	} else {

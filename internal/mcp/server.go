@@ -35,7 +35,7 @@ import (
 const protocolVersion = "2024-11-05"
 
 // serverName is echoed in the initialize response so MCP clients can render an
-// identifying label. The version echoed alongside it is version.Binary — the
+// identifying label. The version echoed alongside it is version.String() — the
 // single stamped source that `ask version` also reports — never a separate
 // literal (a hardcoded copy drifts every release; verify-release check 7 gates it).
 const serverName = "ask-mcp"
@@ -230,7 +230,7 @@ func (s *Server) handleInitialize(enc *json.Encoder, req jsonRPCRequest) {
 		},
 		"serverInfo": map[string]any{
 			"name":    serverName,
-			"version": version.Binary,
+			"version": version.String(),
 		},
 	}
 	s.writeResult(enc, req.ID, res)

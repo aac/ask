@@ -136,6 +136,7 @@ A single Item object. If the id is not found, no JSON is emitted; exit code 3 wi
 
 - Without `--json`: prints the id followed by `\n` to stdout (e.g. `ask-3c89\n`). Nothing else on stdout.
 - With `--json`: prints the full Item object that was just written.
+- Relative-date warning: when the title or body contains relative-date language (`today`, `tonight`, `tomorrow`, `yesterday`, `this morning`, `last night`, `this week`, `next week`, `in N days`, `N days ago`, or a weekday name with no date within a few characters of it), one line per phrase goes to stderr, prefixed `ask new: warning:`, naming the absolute date the phrase resolves to at filing time in the filer's local zone. The item is still filed, exit 0; stdout is unchanged. Recurring days (`every Monday`, `Sundays`) do not warn.
 
 ### 1.7 `ask init`
 
@@ -171,7 +172,14 @@ Invoking with an id but no field flag is a validation error (exit 2) — `ask up
 
 ### 1.9 `ask version`
 
-Prints `BinaryVersion` (a single line) to stdout. No `--json` variant in v1.
+Prints the binary version (a single line) to stdout. No `--json` variant in v1.
+
+- A release build prints the `-ldflags` stamp (`internal/version.Binary`), e.g. `v0.3.0+54537ac`.
+- An unstamped build from a git checkout (plain `go build` / `go install ./cmd/ask`) prints `dev+<12-char commit>[.dirty] <commit time>`, e.g. `dev+54537ac0c321 2026-08-11T13:00:50Z`, from the build info the Go toolchain embeds, so two builds of different commits never print the same string.
+- `go install github.com/aac/ask/cmd/ask@vX.Y.Z` prints the module version.
+- Only a build with no VCS information at all (e.g. `-buildvcs=false`) prints the bare `dev`.
+
+The MCP `initialize` response's `serverInfo.version` reports the same string.
 
 ### 1.10 `ask help [topic]`
 
