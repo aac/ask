@@ -12,6 +12,6 @@ import (
 var BinaryVersion = version.Binary
 
 func runVersion(_ []string) int {
-	fmt.Println(version.Binary)
+	fmt.Println(version.String())
 	return 0
 }

@@ -187,7 +187,7 @@ Sanity-check the binary directly before involving an agent — it's the easiest 
 loop to debug:
 
 ```sh
-ask version             # prints the binary version
+ask version             # prints the binary version (commit + date for source builds)
 ask list                # in an init'd repo, prints "(no items)" — that's the green light
 ```
 
