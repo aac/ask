@@ -63,6 +63,14 @@ type Verifier struct {
 // when its filer gave none (docs/spec.md §1.2).
 const DefaultVerifierTimeoutSeconds = 60
 
+// The spec §1.2 range of verifier.timeout_seconds. ask_new advertises
+// the same two bounds in its schema; `ask new --timeout` checks them
+// here.
+const (
+	MinVerifierTimeoutSeconds = 1
+	MaxVerifierTimeoutSeconds = 3600
+)
+
 // VerifierTimeoutOrDefault maps "no timeout given" (0) to
 // DefaultVerifierTimeoutSeconds and returns any other value unchanged.
 // Both creation paths (`ask new`, ask_new) store its result, and the read

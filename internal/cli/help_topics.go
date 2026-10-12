@@ -486,6 +486,9 @@ Verifier object
                             in v1.
   timeout_seconds  integer  1..3600. Default 60 when a verifier is
                             supplied without an explicit timeout.
+                            ask new --timeout and ask_new both
+                            refuse a value outside the range, an
+                            explicit 0 included (exit/code 2).
                             Items filed by older versions may hold
                             0 on disk; ask reports those as 60.
                             Advisory; ask does not enforce.

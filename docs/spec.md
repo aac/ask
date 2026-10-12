@@ -140,7 +140,7 @@ Rules:
 | `command` | string | yes | 1..4096 chars; passed to the user's shell by the agent that runs the verifier (ask itself never executes it in v1) |
 | `timeout_seconds` | integer | yes | 1..3600; default 60 when verifier supplied without explicit timeout |
 
-The default is applied when the item is created: `ask new --verifier <cmd>` with no `--timeout` (or `--timeout 0`) and `ask_new` with no `verifier.timeout_seconds` both store `60`. Item files written before that was so hold `0`. They are still valid: every read (`show`, `list`, the MCP tools) reports a stored `0` as `60`, so a caller never sees `0` and needs no branch for it. A read does not rewrite the file; the stored value becomes `60` the next time the item is written.
+The default is applied when the item is created: `ask new --verifier <cmd>` with no `--timeout` and `ask_new` with no `verifier.timeout_seconds` both store `60`. A timeout that is given must be in range on both surfaces: `ask new --verifier <cmd> --timeout <n>` with `n` outside 1..3600 exits `2` with `ask new: --timeout must be between 1 and 3600 (got <n>)` and writes nothing, as `ask_new` refuses the same `verifier.timeout_seconds` (§5.1). An explicit `0` is out of range like any other value; it does not mean "default" — omit the flag (or the argument) for that. `--timeout` without `--verifier` has nothing to apply to and is ignored, unchecked. Item files written before that was so hold `0`. They are still valid: every read (`show`, `list`, the MCP tools) reports a stored `0` as `60`, so a caller never sees `0` and needs no branch for it. A read does not rewrite the file; the stored value becomes `60` the next time the item is written.
 
 ### 1.3 Link object
 

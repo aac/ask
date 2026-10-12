@@ -20,7 +20,7 @@ func runNew(args []string) int {
 	body := fs.String("body", "", "Detailed body")
 	urgency := fs.String("urgency", "normal", "blocker|normal|fyi")
 	verifier := fs.String("verifier", "", "Shell command to verify resolution")
-	timeout := fs.Int("timeout", 0, "Verifier timeout in seconds (advisory; default 60)")
+	timeout := fs.Int("timeout", 0, "Verifier timeout in seconds, 1..3600 (advisory; default 60 when omitted)")
 	tracker := fs.String("tracker-ref", "", "Backward provenance: the tracker item that motivated this ask (e.g. act-3c89); metadata only, no queue effect. Use --blocks for a blocking relationship")
 	filedBy := fs.String("filed-by", "", "Free-form filer id")
 	recipient := fs.String("recipient", "", "Free-form recipient ref (e.g. agent:data-prep, human:andrew, team:reviewers)")
@@ -77,6 +77,17 @@ func runNew(args []string) int {
 			fmt.Fprintf(os.Stderr, "ask new: %s\n", msg)
 			return 2
 		}
+	}
+
+	// --timeout, when given alongside a verifier, must be in the spec §1.2
+	// range, the one ask_new enforces. "Given" is whether the flag was set,
+	// not its value: an explicit 0 is out of range, an omitted flag takes
+	// the default below.
+	if *verifier != "" && flagWasSet(fs, "timeout") &&
+		(*timeout < core.MinVerifierTimeoutSeconds || *timeout > core.MaxVerifierTimeoutSeconds) {
+		fmt.Fprintf(os.Stderr, "ask new: --timeout must be between %d and %d (got %d)\n",
+			core.MinVerifierTimeoutSeconds, core.MaxVerifierTimeoutSeconds, *timeout)
+		return 2
 	}
 
 	store, code := openStoreCwd("new")
@@ -142,6 +153,18 @@ func runNew(args []string) int {
 		fmt.Println(item.ID)
 	}
 	return 0
+}
+
+// flagWasSet reports whether name appeared on the command line, as
+// opposed to holding its default.
+func flagWasSet(fs *flag.FlagSet, name string) bool {
+	set := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == name {
+			set = true
+		}
+	})
+	return set
 }
 
 // maxBlocksRefLen caps a single `blocks` ref. The field is opaque — ask

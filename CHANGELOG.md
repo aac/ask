@@ -140,6 +140,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A verifier filed without a timeout is stored with `timeout_seconds` 60, as the spec has
   always said; `ask new --verifier` and the MCP `ask_new` both stored 0. Items already on
   disk with 0 still load and are reported as 60 by `ask show`, `ask list` and the MCP tools.
+- `ask new --timeout` is range-checked. With `--verifier`, a value outside 1..3600 exits 2
+  naming the range and writes nothing; `--timeout -5` and `--timeout 99999` used to be
+  stored as given. An explicit `--timeout 0` is refused too (it used to store the default):
+  omit the flag to get the default 60. This is the rule the MCP `ask_new` already applied
+  to `verifier.timeout_seconds`.
 - The title limit is 200 characters, not 200 bytes. `ask new`, `ask update --title` and the
   MCP `ask_new` / `ask_update` tools counted bytes, so a 200-character title in a non-ASCII
   script was refused with `title must be 1..200 characters`. All four now count Unicode code
