@@ -258,6 +258,14 @@ Tools
     then created_at asc, then id asc). Empty array when none match.
     Default filter (when status omitted and all is not true): status
     != closed.
+    An item file that cannot be read is skipped, and the list is then
+    partial. The result says so in two places: one extra text element
+    per skipped id ("ask list: skipped <id>: <reason>") after the
+    array, and, for a program, the result's _meta object:
+      "_meta": { "ask/skipped": [ { "id":"ask-b4ba",
+                                    "reason":"<reason>" } ] }
+    _meta is there only when something was skipped; a complete list
+    has no _meta key.
 
   ask_show
     Args: id (required) — any non-empty hex prefix, with or without

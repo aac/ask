@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- MCP `ask_list` reports skipped item files as data. When an unreadable item file was
+  skipped, the result carries `"_meta": {"ask/skipped": [{"id", "reason"}]}`, one entry per
+  skipped id, so a program can tell a partial list from a complete one without parsing the
+  prose warning. Nothing else in the result changes: `content[0]` is still the array, the
+  prose warning entries are still there, `isError` is still absent, and a list with nothing
+  skipped has no `_meta` key. It is the MCP counterpart of `ask list --strict`.
 - `ask list --strict` exits 5 when any item file was unreadable and skipped. Output is the
   same as without the flag (the readable items on stdout, one warning per skipped id on
   stderr); only the exit code changes, and only when something was skipped. It is how a
