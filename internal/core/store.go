@@ -35,6 +35,19 @@ const (
 // §2).
 var ErrNotInitialized = errors.New("ask not initialized")
 
+// ErrInvalidID is returned by every FileStore method that turns an id into
+// a path when the id is not a plain file-name stem: empty, `.`, or
+// containing a path separator, `..`, or a NUL. Such an id could address a
+// file outside .ask/items/, so it is refused before any path is built.
+var ErrInvalidID = errors.New("invalid ask id")
+
+// ErrIDMismatch is returned by Load when an item file's `id` member is not
+// the id the file is named for (<id>.json). The file's contents are not
+// trusted to say where the item lives — a store can be handed to harvest
+// by another agent — so such an item is unreadable, on the same footing as
+// a corrupt file (spec §7.2; CLI exit 5).
+var ErrIDMismatch = errors.New("item id does not match its file name")
+
 // StrandedStoreError is returned by OpenStore when a read-path open finds
 // no .ask/config.json but .ask/items/ does hold item files. That store is
 // not empty — it holds ItemCount asks nobody can reach until the config is
