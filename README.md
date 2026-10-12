@@ -188,7 +188,7 @@ loop to debug:
 
 ```sh
 ask version             # prints the binary version (commit + date for source builds)
-ask list                # in an init'd repo, prints "(no items)" — that's the green light
+ask list                # in a freshly init'd repo, prints nothing and exits 0 — that's the green light
 ```
 
 If both work, ask the agent in a new session something like *"what's in my inbox?"* — the
