@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"syscall"
 	"time"
 )
 
@@ -114,7 +115,8 @@ func (s *FileStore) firesPath(id string) (string, error) {
 // appendFireLine appends one record line to the item's fires file with a
 // single write(2) on an append-mode descriptor, so lines from the process
 // that changed the item and from any number of runners never interleave.
-// It takes no lock.
+// It takes no lock. A symlink where the fires directory or the file should
+// be is refused, not followed.
 func (s *FileStore) appendFireLine(itemID string, line any) error {
 	path, err := s.firesPath(itemID)
 	if err != nil {
@@ -125,10 +127,21 @@ func (s *FileStore) appendFireLine(itemID string, line any) error {
 		return fmt.Errorf("marshal fire record of %s: %w", itemID, err)
 	}
 	b = append(b, '\n')
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return fmt.Errorf("create %s: %w", filepath.Dir(path), err)
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("create %s: %w", dir, err)
 	}
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	// A store can come from somewhere else (a harvested worktree, a
+	// checkout), so neither the directory nor the file is followed if it
+	// is a symlink: an append must never land outside .ask/fires/.
+	if fi, err := os.Lstat(dir); err != nil {
+		return fmt.Errorf("stat %s: %w", dir, err)
+	} else if !fi.IsDir() {
+		return fmt.Errorf("%s is not a directory", dir)
+	}
+	// 0600: a result line holds handler output, which is not for other
+	// users of the host.
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY|syscall.O_NOFOLLOW, 0o600)
 	if err != nil {
 		return fmt.Errorf("open %s: %w", path, err)
 	}

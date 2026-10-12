@@ -130,6 +130,12 @@ func RunFire(projectRoot string, args []string) int {
 		return result(FireSpawnFailed, nil, FireDetailProtocolMismatch, "")
 	}
 	event, from, to, at := args[4], args[5], args[6], args[7]
+	// These four reach the handler's environment and stdin, so they are
+	// held to what a status change can produce.
+	if _, err := time.Parse(time.RFC3339Nano, at); err != nil ||
+		!Status(from).Valid() || !Status(to).Valid() || transitionEvent(Status(from), Status(to)) != event {
+		return result(FireSpawnFailed, nil, FireDetailProtocolMismatch, "")
+	}
 
 	subs, err := store.LoadSubs(itemID)
 	if err != nil {
@@ -144,6 +150,11 @@ func RunFire(projectRoot string, args []string) int {
 	}
 	if sub == nil {
 		return result(FireNotRun, nil, FireDetailSubRemoved, "")
+	}
+	// The subs file is read from disk, not trusted: the arguments become
+	// environment variable names and values.
+	if err := ValidateSubArgs(sub.Args); err != nil {
+		return result(FireSpawnFailed, nil, err.Error(), "")
 	}
 	it, err := store.Load(itemID)
 	if err != nil {

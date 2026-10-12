@@ -206,3 +206,63 @@ func TestTailBufferKeepsTheLastBytes(t *testing.T) {
 		t.Errorf("tail %q, want %q", got, "uvwxyz12")
 	}
 }
+
+// TestFireRecordNeverFollowsASymlink: a symlink planted where the fire
+// record, or the fires directory, should be is not written through. The
+// status change still stands; the fire is simply not recorded or run.
+func TestFireRecordNeverFollowsASymlink(t *testing.T) {
+	resolve := func(it *Item, now time.Time) error { return Resolve(it, "", now) }
+
+	t.Run("file", func(t *testing.T) {
+		store, id := fireTestStore(t, []string{EventResolve})
+		victim := filepath.Join(t.TempDir(), "victim")
+		if err := os.WriteFile(victim, []byte("untouched\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		dir := filepath.Join(store.Root(), firesSubdir)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(victim, filepath.Join(dir, id+".jsonl")); err != nil {
+			t.Fatal(err)
+		}
+		ch, err := store.Mutate(id, time.Now().UTC(), resolve)
+		if err != nil || !ch.Changed || len(ch.Fires) != 0 {
+			t.Fatalf("resolve over a symlinked record: change %+v, err %v", ch, err)
+		}
+		if b, _ := os.ReadFile(victim); string(b) != "untouched\n" {
+			t.Errorf("the symlink's target was written: %q", b)
+		}
+	})
+
+	t.Run("directory", func(t *testing.T) {
+		store, id := fireTestStore(t, []string{EventResolve})
+		elsewhere := t.TempDir()
+		if err := os.Symlink(elsewhere, filepath.Join(store.Root(), firesSubdir)); err != nil {
+			t.Fatal(err)
+		}
+		ch, err := store.Mutate(id, time.Now().UTC(), resolve)
+		if err != nil || !ch.Changed || len(ch.Fires) != 0 {
+			t.Fatalf("resolve over a symlinked fires directory: change %+v, err %v", ch, err)
+		}
+		if entries, _ := os.ReadDir(elsewhere); len(entries) != 0 {
+			t.Errorf("the symlink's target directory was written: %v", entries)
+		}
+	})
+}
+
+// TestFireRecordIsOwnerOnly: a result line holds handler output, so the
+// record is not readable by other users of the host.
+func TestFireRecordIsOwnerOnly(t *testing.T) {
+	store, id := fireTestStore(t, []string{EventResolve})
+	if _, err := store.Mutate(id, time.Now().UTC(), func(it *Item, now time.Time) error { return Resolve(it, "", now) }); err != nil {
+		t.Fatal(err)
+	}
+	fi, err := os.Stat(filepath.Join(store.Root(), firesSubdir, id+".jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if perm := fi.Mode().Perm(); perm != 0o600 {
+		t.Errorf("fire record mode %o, want 600", perm)
+	}
+}
