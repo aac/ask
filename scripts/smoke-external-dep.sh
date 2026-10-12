@@ -18,7 +18,6 @@
 set -u
 set -o pipefail
 
-SCRIPT_NAME=$(basename "$0")
 TMPDIR_ROOT=""
 
 # ---- output helpers ---------------------------------------------------------
@@ -39,6 +38,7 @@ envfail() {
   exit 3
 }
 
+# shellcheck disable=SC2329  # invoked indirectly via trap below
 cleanup() {
   if [[ -n "$TMPDIR_ROOT" && -d "$TMPDIR_ROOT" ]]; then
     rm -rf "$TMPDIR_ROOT"
