@@ -113,7 +113,7 @@ plugin and its MCP server work today:
 - **Claude Code:** `/plugin marketplace add aac/ask`, then `/plugin install ask@ask`.
 - **Codex:** `codex plugin marketplace add aac/ask`, then `codex plugin add ask@ask`. The
   Codex manifest points at the bundled skill (`./skills/`) and MCP server config
-  (`./.mcp.json`); Codex launches the MCP server from the active project root.
+  (`./.codex-plugin/mcp.json`); Codex launches the MCP server from the active project root.
 - **No plugin manager?** Point your agent at this repo (`github.com/aac/ask`) and let it
   install whatever way fits its environment.
 
@@ -139,9 +139,9 @@ quarantined.
 
 For Codex CLI, install the skill from a repo clone — copy `skills/ask/` into
 `~/.codex/skills/ask/`, or symlink it with
-`ln -s <path-to-ask-clone>/skills/ask ~/.codex/skills/ask`. Register MCP by copying this
-repo's `.mcp.json` into the target project — Codex reads `.mcp.json` from the project root
-on startup:
+`ln -s <path-to-ask-clone>/skills/ask ~/.codex/skills/ask`. Register MCP by creating a
+`.mcp.json` in the target project with the entry below (`ask` must be on your `PATH`) —
+Codex reads `.mcp.json` from the project root on startup:
 
 ```json
 {

@@ -72,6 +72,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a human's inbox.
 
 ### Fixed
+- A Claude Code session started inside a checkout of this repo no longer gets a failing
+  `ask` MCP server. The plugin's server was declared in a root `.mcp.json`, which Claude Code
+  also reads as project-scope config for any session rooted there; `${CLAUDE_PLUGIN_ROOT}` is
+  unset outside the plugin loader, so the server failed to start and shadowed a working
+  user-scope `ask` entry. The declaration now lives inline in `.claude-plugin/plugin.json`
+  (`mcpServers`), which only the plugin loader reads, and the root `.mcp.json` is gone. The
+  installed plugin is unchanged, and Codex keeps reading `.codex-plugin/mcp.json`.
 - `ask harvest`'s refusal for a stray source file (a name like `ASK-AAAB.json` that is not an
   id) names the file — `stray file in .ask/items/ not named for an id: ASK-AAAB.json` — in the
   words `ask list` and `ask show` already use, instead of `invalid ask id "ASK-AAAB"`.
