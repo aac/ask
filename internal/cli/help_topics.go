@@ -260,7 +260,8 @@ Tools
     != closed.
     An item file that cannot be read is skipped, and the list is then
     partial. The result says so in two places: one extra text element
-    per skipped id ("ask list: skipped <id>: <reason>") after the
+    per skipped id ("ask list: skipped <id>: <reason>"; for a stray
+    file not named for an id the reason names the file) after the
     array, and, for a program, the result's _meta object:
       "_meta": { "ask/skipped": [ { "id":"ask-b4ba",
                                     "reason":"<reason>" } ] }

@@ -149,7 +149,7 @@ func tools() []toolDescriptor {
 		},
 		{
 			Name:        "ask_list",
-			Description: "List asks. Defaults to status != closed; pass `all: true` for every state (spec §3, §5.3). An item file that cannot be read is skipped: the array of readable items is content[0], each skipped id adds a text part `ask list: skipped <id>: <reason>`, and the result's `_meta` carries the same skips as data: `\"ask/skipped\": [{\"id\", \"reason\"}]` (no `_meta` when nothing was skipped).",
+			Description: "List asks. Defaults to status != closed; pass `all: true` for every state (spec §3, §5.3). An item file that cannot be read is skipped: the array of readable items is content[0], each skipped id adds a text part `ask list: skipped <id>: <reason>` (for a stray file not named for an id, `<id>` is the name stem and the reason names the file, e.g. `ASK-AAAB.json`), and the result's `_meta` carries the same skips as data: `\"ask/skipped\": [{\"id\", \"reason\"}]` (no `_meta` when nothing was skipped).",
 			InputSchema: map[string]any{
 				"type":                 "object",
 				"additionalProperties": false,

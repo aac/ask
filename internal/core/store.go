@@ -311,8 +311,9 @@ func (s *FileStore) ListIDs() ([]string, error) {
 // SkippedItem names one item file List could not read, and why. Err is the
 // error Load returned for that id: a JSON decode failure, a wrapped
 // ErrUnsupportedSchemaVersion, a wrapped ErrIDMismatch, or an I/O error on
-// the file itself. ID is always the filename id, never the file's own
-// claim.
+// the file itself. For a stray file, whose name is not a valid id, Err
+// wraps ErrInvalidID and names the file (<ID>.json). ID is always the
+// filename id (the name stem), never the file's own claim.
 type SkippedItem struct {
 	ID  string
 	Err error
@@ -355,6 +356,13 @@ func (s *FileStore) List() (items []*Item, skipped []SkippedItem, err error) {
 	}
 	out := make([]*Item, 0, len(ids))
 	for _, id := range ids {
+		if checkID(id) != nil {
+			// A stray: its name is not an id, so the skip names the
+			// file, in the words ResolvePrefix uses for the same file.
+			skipped = append(skipped, SkippedItem{ID: id, Err: fmt.Errorf(
+				"%w: stray file in .ask/items/ not named for an id: %s.json", ErrInvalidID, id)})
+			continue
+		}
 		it, err := s.Load(id)
 		if errors.Is(err, ErrIDNotFound) {
 			continue

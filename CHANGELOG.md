@@ -157,6 +157,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   1024-character value in a non-ASCII script (2048 bytes or more) was refused on both; the
   MCP schema already advertised the limit in characters. Both now use one validator, and
   the `ask list --recipient` / `--blocks` filters on the CLI count the same way.
+- `ask list`'s warning for a stray file in `items/` names the file. It read
+  `ask list: skipped ASK-AAAB: load item: invalid ask id "ASK-AAAB"`, which looks like a bad
+  id rather than a misnamed file; it now reads `ask list: skipped ASK-AAAB: invalid ask id:
+  stray file in .ask/items/ not named for an id: ASK-AAAB.json`. The line's shape and the
+  `id` in MCP `_meta["ask/skipped"]` are unchanged (only that entry's `reason` text follows),
+  and a skip for a validly named but unreadable item reads as before.
 - MCP `ask_list` counts its `recipient` and `blocks` filters in characters too. It still
   counted bytes, so an item filed with a 1024-character non-ASCII ref (accepted by `ask new`
   and `ask_new`) could not be filtered for through MCP: the filter was refused with
