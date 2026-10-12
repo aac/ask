@@ -133,22 +133,25 @@ func runUpdate(args []string) int {
 		return 5
 	}
 
-	prevTitle, prevBody := it.Title, it.Body
+	// The edit itself is core.TextUpdate, shared with the ask_update MCP
+	// tool so the two surfaces cannot drift.
+	upd := core.TextUpdate{}
 	if set["title"] {
-		it.Title = strings.TrimSpace(*title)
+		upd.Title = title
 	}
 	switch {
 	case set["body"], set["body-file"]:
-		it.Body = newBody
+		upd.Body = &newBody
 	case set["body-append"], set["body-append-file"]:
-		it.Body = appendBodyText(it.Body, appendBody)
+		upd.BodyAppend = &appendBody
 	}
+	changed := upd.Apply(it)
 
 	// No-op envelope (spec §1.8 + §2): the item already reads exactly as
 	// requested. Skip the write so a non-mutation doesn't touch mtime, and
 	// return 6 so scripts that care can branch; stdout still emits the
 	// success shape.
-	if it.Title == prevTitle && it.Body == prevBody {
+	if !changed {
 		fmt.Fprintf(os.Stderr, "ask update: %s already reads as requested\n", it.ID)
 		emitUpdated(it, *asJSON, "unchanged")
 		return 6
@@ -172,16 +175,6 @@ func emitUpdated(it *core.Item, asJSON bool, state string) {
 	fmt.Printf("%s: %s\n", it.ID, state)
 }
 
-// appendBodyText joins an existing body and an appended note with a blank
-// line, per `act update --description-append`. An empty existing body
-// yields the addition alone rather than a leading blank line.
-func appendBodyText(existing, addition string) string {
-	if strings.TrimSpace(existing) == "" {
-		return addition
-	}
-	return strings.TrimRight(existing, "\n") + "\n\n" + addition
-}
-
 // readTextSource reads path as UTF-8 text, treating "-" as stdin. Mirrors
 // `act update --description-file`.
 func readTextSource(path string) (string, error) {
@@ -199,20 +192,9 @@ func readTextSource(path string) (string, error) {
 	return string(b), nil
 }
 
-// validateTitle enforces the spec §1.1 title rules shared by `ask new` and
-// `ask update`: non-empty after trim, 1..200 characters, no newlines.
-// Returns (errorMessage, false) on the first failure; the message is
-// shaped to be wrapped with the verb prefix at the caller.
+// validateTitle is the spec §1.1 title check shared by `ask new` and
+// `ask update`. The rules live in core so the ask_update MCP tool applies
+// the same ones.
 func validateTitle(title string) (string, bool) {
-	t := strings.TrimSpace(title)
-	if t == "" {
-		return "title must not be empty", false
-	}
-	if len(t) > 200 {
-		return "title must be 1..200 characters", false
-	}
-	if strings.ContainsAny(t, "\n\r") {
-		return "title must not contain newlines", false
-	}
-	return "", true
+	return core.ValidateTitle(title)
 }
