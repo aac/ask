@@ -89,6 +89,16 @@ Rules:
   one and only legal default. Treat any *explicit* non-empty value other
   than `"1"` as a hard error in v1 (the field exists precisely so a
   future ask version can detect it and either migrate or refuse).
+  Concretely: the item is unreadable to this binary, on the same
+  per-item footing as a corrupt item file (§7.2). `ask show` and every
+  verb that would rewrite the item (`resolve`, `close`, `reopen`,
+  `update`, `harvest`, and their MCP twins) fail with exit 5 and a
+  message naming `schema_version` and the value found; the file is left
+  byte-identical, and the item is never listed as an ordinary v1 item.
+  The check runs before any other field is interpreted.
+- **Write path refusal:** `core.FileStore.Save` refuses to write an Item
+  whose `schema_version` is anything other than `"1"`, so no code path
+  can produce or overwrite a non-v1 item file.
 - **No migration framework in v1.** The field is in place so a v1.x
   bump has a hook to migrate from; the framework itself is deferred
   (see `docs/distribution-readiness.md` §6 and §12 below). v1 never
@@ -205,7 +215,7 @@ The full taxonomy. Every CLI invocation returns exactly one of these.
 | `2` | Validation error | bad flag, missing required arg, title >200 chars, urgency not in set, invalid transition (e.g. `resolve` on a `closed` item), unknown subcommand, unknown help topic, attempt to set `verifier.type` to a reserved-but-unimplemented value (`url`, `mcp`) |
 | `3` | Not found | id prefix matches zero items |
 | `4` | Ambiguous id prefix | id prefix matches >1 items |
-| `5` | I/O / disk error | cannot read/write `.ask/`, corrupt `config.json` (§7), atomic-rename failure, no `.ask/` present when one is required (run `ask init` first) |
+| `5` | I/O / disk error | cannot read/write `.ask/`, corrupt `config.json` (§7), an item file that is corrupt or carries a `schema_version` other than `"1"` (§1.1.1), atomic-rename failure, no `.ask/` present when one is required (run `ask init` first) |
 | `6` | Already-handled idempotent no-op | `resolve` on a `resolved` item, `close` on a `closed` item, `reopen` on an `open` item, `ask init` in an already-initialized directory when no fields would change. Always paired with a stderr warning. Stdout still emits the success-shape (id or item) so scripts can pipe results uniformly. |
 | `7` | Stranded store | `.ask/config.json` is absent but `.ask/items/` holds item files (§7). Distinct from `5` so a consumer can tell "no inbox here" from "an unreachable inbox holding N asks" without inspecting `.ask/items/` itself. `ask init` in that directory is the repair; it adopts the existing items. |
 
