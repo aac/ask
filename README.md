@@ -171,7 +171,7 @@ Clear the flag once:
 xattr -d com.apple.quarantine /path/to/ask
 ```
 
-This is a pre-v1 stopgap; the durable fix — codesigning + notarization, which
+This is a stopgap; the durable fix — codesigning + notarization, which
 drops the prompt entirely — is deferred to a later release.
 
 ### First inbox
@@ -202,9 +202,10 @@ are git operations the user explicitly invokes.
 
 ## Status
 
-`ask` is pre-v1 but in daily use across a range of projects. The CLI, MCP server, skill,
-and install path are all in place; the remaining work before release is packaging and docs
-polish.
+`ask` is released as an installable plugin (current version 0.2.1) and is in daily use across a
+range of projects. The CLI, MCP server, skill, and install path are all in place; install with
+`/plugin marketplace add aac/ask` then `/plugin install ask@ask` (see Install above for Codex
+and the bare binary). Codesigning and notarization of the macOS binary are still to come.
 
 Design & internals: [`docs/spec.md`](docs/spec.md) is the authoritative implementation
 contract — field types, error shapes, exit codes, JSON shapes.
