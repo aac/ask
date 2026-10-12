@@ -81,6 +81,16 @@ func runShow(args []string) int {
 		return 5
 	}
 
+	// Subscriptions are read only for the text view: `ask show --json` is
+	// the Item and nothing else.
+	var subs *core.SubsFile
+	if !*asJSON {
+		if subs, err = store.LoadSubs(full); err != nil {
+			fmt.Fprintf(os.Stderr, "ask show: %v\n", err)
+			return 5
+		}
+	}
+
 	if *asJSON {
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
@@ -141,6 +151,12 @@ func runShow(args []string) int {
 	}
 	if it.ResolutionNote != nil && *it.ResolutionNote != "" {
 		fmt.Printf("\nResolution note: %s\n", *it.ResolutionNote)
+	}
+	if len(subs.Subscriptions) > 0 {
+		fmt.Println("\nSubscriptions:")
+		for _, sub := range subs.Subscriptions {
+			fmt.Printf("  - %s\n", formatSubscription(sub))
+		}
 	}
 	return 0
 }

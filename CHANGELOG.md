@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `ask subscribe <id> --on <event>[,<event>] --handler <name> [--arg key=value ...]` and
+  `ask unsubscribe <id> <subscription-id>` store and remove a subscription: "when this item
+  is resolved, closed or reopened, run this handler". A handler is an executable at
+  `~/.config/ask/callbacks/<name>` on the host where the store lives. Subscriptions live in
+  `.ask/subs/<id>.json`; `ask show` lists them, `ask harvest` carries them with their item,
+  and the Item schema, `ask show --json` and the MCP tools are unchanged. `subscribe` exits 8
+  when the item is already resolved and the subscription names `resolve` (stored anyway),
+  6 for an identical subscription, 2 for a closed item. Nothing runs a handler yet.
 - `ask version` distinguishes builds. Without an `-ldflags` stamp it now prints
   `dev+<commit>[.dirty] <commit time>` from the build info Go embeds in every build from a
   checkout, instead of the bare `dev` — so a stale install is visible from the binary itself.
