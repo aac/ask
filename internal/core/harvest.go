@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strings"
 )
 
 // ErrIDCollision is returned by Harvest when the source store contains one
@@ -12,6 +13,27 @@ import (
 // list of colliding ids so callers can surface them to the human; neither
 // store is mutated when this error fires (Harvest is preflighted).
 var ErrIDCollision = errors.New("id collisions in target")
+
+// ErrUnreadableSource is returned by Harvest when one or more source items
+// cannot be read (corrupt JSON, an unsupported schema_version, an I/O
+// error). The message names every such id with its reason; neither store
+// is mutated when this error fires.
+var ErrUnreadableSource = errors.New("unreadable source item(s)")
+
+// unreadableItems is the per-item failure list behind ErrUnreadableSource:
+// one line of text for the human, while Unwrap keeps each cause (e.g.
+// ErrUnsupportedSchemaVersion) reachable through errors.Is.
+type unreadableItems []error
+
+func (u unreadableItems) Error() string {
+	parts := make([]string, len(u))
+	for i, e := range u {
+		parts[i] = e.Error()
+	}
+	return strings.Join(parts, "; ")
+}
+
+func (u unreadableItems) Unwrap() []error { return u }
 
 // HarvestResult summarizes a Harvest operation. Harvested holds the ids
 // successfully copied from source to target (sorted, never nil — `[]` in
@@ -32,9 +54,12 @@ type HarvestResult struct {
 // Behavior:
 //   - Pre-flight: if any source id already exists in target, returns
 //     ErrIDCollision wrapping the colliding ids. Neither store is touched.
-//   - Copy pass: each item is Load'd from source and Save'd to target via
-//     the canonical schema (so any drift in the source's on-disk format
-//     surfaces here, not silently later).
+//   - Validation pass: every source item is Load'd via the canonical
+//     schema before anything is written. If any is unreadable, returns
+//     ErrUnreadableSource naming every unreadable id; neither store is
+//     touched. Harvest never skips an unreadable item — skipping plus
+//     clean would lose an ask.
+//   - Copy pass: each loaded item is Save'd to target.
 //   - Optional cleanup: when clean is true, after every copy succeeds the
 //     source items are removed. The two passes are ordered (all writes
 //     first, then all deletes) so a copy failure never leaves a source
@@ -67,16 +92,31 @@ func Harvest(target, source *FileStore, clean bool) (*HarvestResult, error) {
 		return nil, fmt.Errorf("%w: %v", ErrIDCollision, collisions)
 	}
 
-	harvested := []string{}
+	// Validate before writing: read every source item first, so one
+	// unreadable item fails the whole harvest with the target untouched
+	// rather than leaving the items that sorted ahead of it copied
+	// (act-f80d7a). Every unreadable id is reported, not just the first.
+	items := make([]*Item, 0, len(srcIDs))
+	var unreadable unreadableItems
 	for _, id := range srcIDs {
 		it, err := source.Load(id)
 		if err != nil {
-			return nil, fmt.Errorf("read source %s: %w", id, err)
+			unreadable = append(unreadable, fmt.Errorf("%s: %w", id, err))
+			continue
 		}
+		items = append(items, it)
+	}
+	if len(unreadable) > 0 {
+		return nil, fmt.Errorf("%w (%d), nothing copied: %w",
+			ErrUnreadableSource, len(unreadable), unreadable)
+	}
+
+	harvested := []string{}
+	for _, it := range items {
 		if err := target.Save(it); err != nil {
-			return nil, fmt.Errorf("write target %s: %w", id, err)
+			return nil, fmt.Errorf("write target %s: %w", it.ID, err)
 		}
-		harvested = append(harvested, id)
+		harvested = append(harvested, it.ID)
 	}
 
 	if clean {

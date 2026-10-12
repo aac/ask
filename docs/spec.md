@@ -96,6 +96,11 @@ Rules:
   message naming `schema_version` and the value found; the file is left
   byte-identical, and the item is never listed as an ordinary v1 item.
   The check runs before any other field is interpreted.
+  `harvest` is all-or-nothing about this: it reads and validates every
+  source item before writing any, so if one or more are unreadable
+  (non-v1 or corrupt) it exits 5 naming each such id, having copied
+  nothing into the target and — `--clean` or not — removed nothing from
+  the source. It never skips an unreadable item.
 - **Write path refusal:** `core.FileStore.Save` refuses to write an Item
   whose `schema_version` is anything other than `"1"`, so no code path
   can produce or overwrite a non-v1 item file.

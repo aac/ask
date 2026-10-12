@@ -55,7 +55,10 @@ Cross-store move
                              so items filed there are invisible to the
                              main checkout until harvested. Pre-flight
                              checks refuse the call on id collision or
-                             when source==target; --clean removes source
+                             when source==target, and every source item
+                             is read before any is written, so an
+                             unreadable one (exit 5, each id named)
+                             copies nothing; --clean removes source
                              items after a successful copy so re-running
                              is a clean no-op.
 
