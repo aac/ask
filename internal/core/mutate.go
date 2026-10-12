@@ -17,6 +17,11 @@ type Change struct {
 	// Changed reports whether fn altered the item. An unaltered item is not
 	// re-saved, so a no-op never touches the file.
 	Changed bool
+	// Fires lists the fires this change started, one per subscription
+	// whose events include the status change. Each has its started line
+	// in the item's fires file and its own detached runner; none has been
+	// waited for.
+	Fires []FireStarted
 }
 
 // RefusedError wraps an error returned by a Mutate callback: the item was
@@ -46,7 +51,25 @@ func (e *RefusedError) Unwrap() error { return e.Err }
 //   - anything else: I/O (exit 5).
 //
 // Nothing is written on any error path.
+//
+// A saved status change also fires the item's subscriptions (see
+// recordFires and startFires): the started lines are appended under the
+// lock, and the runners are started after it is released and never waited
+// for. A change that leaves the status alone, and a no-op, fire nothing.
+// Firing cannot fail or alter the write, and a handler is never retried.
 func (s *FileStore) Mutate(idOrPrefix string, now time.Time, fn func(it *Item, now time.Time) error) (*Change, error) {
+	ch, err := s.mutateLocked(idOrPrefix, now, fn)
+	if err != nil {
+		return nil, err
+	}
+	// The lock is released: start the handlers this change fires.
+	s.startFires(ch.Item.ID, ch.Fires)
+	return ch, nil
+}
+
+// mutateLocked is the locked half of Mutate: everything up to and
+// including the started lines of the fires the change causes.
+func (s *FileStore) mutateLocked(idOrPrefix string, now time.Time, fn func(it *Item, now time.Time) error) (*Change, error) {
 	lock, err := s.Lock()
 	if err != nil {
 		return nil, err
@@ -83,7 +106,7 @@ func (s *FileStore) Mutate(idOrPrefix string, now time.Time, fn func(it *Item, n
 	if err := s.Save(it); err != nil {
 		return nil, err
 	}
-	return &Change{Item: it, From: from, Changed: true}, nil
+	return &Change{Item: it, From: from, Changed: true, Fires: s.recordFires(it, from, now)}, nil
 }
 
 // lockStores takes the locks of two distinct stores in path order, so two

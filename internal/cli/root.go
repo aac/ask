@@ -3,6 +3,8 @@ package cli
 import (
 	"fmt"
 	"os"
+
+	"github.com/aac/ask/internal/core"
 )
 
 type commandFunc func(args []string) int
@@ -24,6 +26,9 @@ var commands = map[string]commandFunc{
 	"version":     runVersion,
 	"-h":          runHelp,
 	"--help":      runHelp,
+
+	// Hidden: the runner a fire re-executes ask as. Not in help.
+	core.RunnerVerb: runFire,
 }
 
 // Run dispatches the top-level subcommand. Returns the exit code per the
