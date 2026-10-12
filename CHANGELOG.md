@@ -91,6 +91,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   from the source. Harvest now exits 5 naming the file, copying and removing nothing,
   whenever a name in the target's `items/` differs from a source item's file name only in
   case. It compares names, so the refusal is the same on a case-sensitive filesystem.
+- `ask harvest` no longer overwrites a stray file in the target's `.ask/subs/` either. With a
+  hand-placed `subs/ASK-AAAB.json` in the target and a source `ask-aaab` that has a
+  subscription, on a case-insensitive filesystem harvest exited 0, replaced the stray's
+  contents with the subscriptions and left it named `ASK-AAAB.json`. Harvest now exits 5
+  naming it as `subs/ASK-AAAB.json`, copying and removing nothing, in the same message as the
+  other harvest refusals. A source item with no subscriptions writes nothing under `subs/`,
+  so a stray matching only such an item does not refuse the harvest.
 - Two writers of one item can no longer overwrite each other. `resolve`, `reopen`, `close`
   and `update` (and the MCP `ask_resolve` / `ask_reopen` / `ask_close` / `ask_update` tools) loaded an
   item,

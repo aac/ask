@@ -115,6 +115,11 @@ Rules:
   unreadable. The check compares names and does not probe the
   filesystem, so the store is refused on a case-sensitive one too. It is
   reported in the same message as a collision or unreadable items.
+  The target's `subs/` is checked the same way against the subs file
+  (`subs/<id>.json`) of every source item that has subscriptions, the
+  only subs files a harvest writes; such an entry is named with its
+  directory (`subs/ASK-AAAB.json`) in that same message. A source item
+  with no subscriptions is not checked against `subs/`.
 - **Write path refusal:** `core.FileStore.Save` refuses to write an Item
   whose `schema_version` is anything other than `"1"`, so no code path
   can produce or overwrite a non-v1 item file.

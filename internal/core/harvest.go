@@ -27,27 +27,31 @@ var ErrUnreadableSource = errors.New("unreadable source item(s)")
 // ASK-AAAB.json against ask-aaab. On a case-insensitive filesystem the
 // copy would be written into that entry and keep its name, so the
 // harvested ask would be unreadable in the target (act-f9ab23). The
-// message names each such file; neither store is mutated.
+// same holds for the target's subs directory and the subs file of a
+// source item that has subscriptions; such a file is named as
+// subs/<file> (act-48158e). The message names each such file; neither
+// store is mutated.
 var ErrStrayTarget = errors.New("target file differs from a source item's only in case")
 
-// strayTargetTwins returns one "<file> (source <id>)" entry for every name
-// in target's items directory that a source id's file name matches under
-// case folding but not exactly. It compares names and never probes the
-// filesystem, so the answer is the same whether or not the filesystem
-// folds case. Directories count: a name is in the way whatever it names.
-func strayTargetTwins(target *FileStore, srcIDs []string) ([]string, error) {
-	entries, err := os.ReadDir(filepath.Join(target.root, itemsSubdir))
+// strayTargetTwins returns one "<label><file> (source <id>)" entry for
+// every name in target's subdir (items or subs) that a source id's file
+// name matches under case folding but not exactly. It compares names and
+// never probes the filesystem, so the answer is the same whether or not
+// the filesystem folds case. Directories count: a name is in the way
+// whatever it names.
+func strayTargetTwins(target *FileStore, subdir, label string, srcIDs []string) ([]string, error) {
+	entries, err := os.ReadDir(filepath.Join(target.root, subdir))
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("read target items dir: %w", err)
+		return nil, fmt.Errorf("read target %s dir: %w", subdir, err)
 	}
 	var twins []string
 	for _, e := range entries {
 		for _, id := range srcIDs {
 			if want := id + ".json"; e.Name() != want && strings.EqualFold(e.Name(), want) {
-				twins = append(twins, fmt.Sprintf("%s (source %s)", e.Name(), id))
+				twins = append(twins, fmt.Sprintf("%s%s (source %s)", label, e.Name(), id))
 			}
 		}
 	}
@@ -93,7 +97,9 @@ type HarvestResult struct {
 //     both (it is ErrIDCollision and ErrUnreadableSource).
 //     A target file whose name differs from a source item's only in case
 //     is refused the same way (ErrStrayTarget, naming the file), and is
-//     reported together with either of the other two.
+//     reported together with either of the other two. So is a file in
+//     the target's subs directory that differs only in case from the subs
+//     file of a source item that has subscriptions (act-48158e).
 //   - Validation pass: every source item is Load'd via the canonical
 //     schema before anything is written. If any is unreadable, returns
 //     ErrUnreadableSource naming every unreadable id; neither store is
@@ -146,7 +152,7 @@ func Harvest(target, source *FileStore, clean bool) (*HarvestResult, error) {
 			collisions = append(collisions, id)
 		}
 	}
-	twins, err := strayTargetTwins(target, srcIDs)
+	twins, err := strayTargetTwins(target, itemsSubdir, "", srcIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -161,6 +167,7 @@ func Harvest(target, source *FileStore, clean bool) (*HarvestResult, error) {
 	items := make([]*Item, 0, len(srcIDs))
 	subs := make([]*SubsFile, 0, len(srcIDs))
 	var unreadable unreadableItems
+	var subbed []string // readable source ids that have subscriptions
 	for _, id := range srcIDs {
 		it, err := source.Load(id)
 		if err != nil {
@@ -174,7 +181,17 @@ func Harvest(target, source *FileStore, clean bool) (*HarvestResult, error) {
 		}
 		items = append(items, it)
 		subs = append(subs, f)
+		if len(f.Subscriptions) > 0 {
+			subbed = append(subbed, id)
+		}
 	}
+	// Only a subs file the copy pass would write can land in a stray: an
+	// item with no subscriptions writes nothing under subs/.
+	subsTwins, err := strayTargetTwins(target, subsSubdir, subsSubdir+"/", subbed)
+	if err != nil {
+		return nil, err
+	}
+	twins = append(twins, subsTwins...)
 	var refusal error
 	switch {
 	case len(collisions) > 0 && len(unreadable) > 0:
