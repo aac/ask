@@ -36,12 +36,12 @@ import (
 // constant (internal/cli.maxBlocksRefLen); duplicated here so the MCP
 // package does not depend on the CLI package. 1024 matches the bound
 // sketched in act-2a1b.
-const maxBlocksRefLen = 1024
+const maxBlocksRefLen = core.MaxRefLen
 
 // maxRecipientRefLen caps a `recipient` ref. Same bound as a single
 // blocks ref. Mirrors the CLI constant (internal/cli.maxRecipientRefLen);
 // duplicated to keep MCP independent of the CLI package.
-const maxRecipientRefLen = 1024
+const maxRecipientRefLen = core.MaxRefLen
 
 // Length caps advertised as `maxLength` in the tool schemas below. A
 // schema is only a hint to the client — nothing on the wire stops a
@@ -309,24 +309,19 @@ func callNew(repoRoot string, raw json.RawMessage) (string, bool) {
 	}
 	// Each blocks ref must be non-empty after trim and within the
 	// per-ref cap. ask never interprets the format; this is the only
-	// validation. Mirrors the CLI rules in internal/cli/new.go.
+	// validation: core.ValidateRef, the rule the CLI applies, counting
+	// characters (Unicode code points) as the schema's maxLength does.
 	for _, ref := range args.Blocks {
-		if strings.TrimSpace(ref) == "" {
-			return encodeErr(2, "ask new: blocks: ref must not be empty or whitespace-only"), true
-		}
-		if len(ref) > maxBlocksRefLen {
-			return encodeErr(2, fmt.Sprintf("ask new: blocks: ref exceeds %d characters", maxBlocksRefLen)), true
+		if msg, ok := core.ValidateRef("blocks", ref); !ok {
+			return encodeErr(2, "ask new: "+msg), true
 		}
 	}
 	// recipient (when present) is validated the same way as a single
 	// blocks ref: non-empty after trim, within the per-ref cap. Absent
 	// (== "") means no recipient; that's fine.
 	if args.Recipient != "" {
-		if strings.TrimSpace(args.Recipient) == "" {
-			return encodeErr(2, "ask new: recipient: ref must not be empty or whitespace-only"), true
-		}
-		if len(args.Recipient) > maxRecipientRefLen {
-			return encodeErr(2, fmt.Sprintf("ask new: recipient: ref exceeds %d characters", maxRecipientRefLen)), true
+		if msg, ok := core.ValidateRef("recipient", args.Recipient); !ok {
+			return encodeErr(2, "ask new: "+msg), true
 		}
 	}
 	// The remaining advertised maxLength caps (the title, blocks and

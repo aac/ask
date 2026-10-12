@@ -1,6 +1,7 @@
 package core
 
 import (
+	"fmt"
 	"strings"
 	"unicode/utf8"
 )
@@ -69,6 +70,29 @@ func ValidateTitle(title string) (string, bool) {
 	}
 	if strings.ContainsAny(t, "\n\r") {
 		return "title must not contain newlines", false
+	}
+	return "", true
+}
+
+// MaxRefLen caps a `recipient` value and each `blocks` ref (spec §1.1).
+// Both are opaque cross-system strings ask never interprets; 1024 is
+// comfortably above any sensible identifier scheme (`act-XXXX`,
+// `agent:<name>`, URLs, ULIDs) without inviting body-sized payloads.
+const MaxRefLen = 1024
+
+// ValidateRef enforces the one rule set a `recipient` value and a single
+// `blocks` ref share: non-empty after a whitespace trim, and at most
+// MaxRefLen characters. Characters are Unicode code points, not bytes,
+// as in ValidateTitle and as the MCP schemas' maxLength reads. field is
+// the name the message leads with ("recipient" or "blocks"). Returns
+// (errorMessage, false) on the first failure; the message is shaped to
+// be wrapped with the verb prefix at the caller.
+func ValidateRef(field, ref string) (string, bool) {
+	if strings.TrimSpace(ref) == "" {
+		return field + ": ref must not be empty or whitespace-only", false
+	}
+	if utf8.RuneCountInString(ref) > MaxRefLen {
+		return fmt.Sprintf("%s: ref exceeds %d characters", field, MaxRefLen), false
 	}
 	return "", true
 }

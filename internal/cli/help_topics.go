@@ -392,7 +392,8 @@ Item object (.ask/items/ask-XXXX.json)
                                        --json. Set it when the filing
                                        session is non-obvious; skip when
                                        it isn't.
-  recipient            string | null   Free-form, 1..1024 chars,
+  recipient            string | null   Free-form, 1..1024 chars
+                                       (characters, not bytes),
                                        non-whitespace. Optional
                                        agent-to-agent label naming who
                                        should pick the ask up.
@@ -446,7 +447,8 @@ Item object (.ask/items/ask-XXXX.json)
   blocks               array           Array of opaque cross-tool refs
                                        (strings) this ask is blocking.
                                        Always present, [] when none.
-                                       Each ref 1..1024 chars,
+                                       Each ref 1..1024 chars
+                                       (characters, not bytes),
                                        non-whitespace. ask never
                                        interprets the format;
                                        orchestrators do (typically an

@@ -145,6 +145,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   stored as given. An explicit `--timeout 0` is refused too (it used to store the default):
   omit the flag to get the default 60. This is the rule the MCP `ask_new` already applied
   to `verifier.timeout_seconds`.
+- The 1024 limit on `recipient` and on each `blocks` ref is 1024 characters, not 1024 bytes.
+  `ask new --recipient` / `--blocks` and the MCP `ask_new` both counted bytes, so a
+  1024-character value in a non-ASCII script (2048 bytes or more) was refused on both; the
+  MCP schema already advertised the limit in characters. Both now use one validator, and
+  the `ask list --recipient` / `--blocks` filters on the CLI count the same way.
 - The title limit is 200 characters, not 200 bytes. `ask new`, `ask update --title` and the
   MCP `ask_new` / `ask_update` tools counted bytes, so a 200-character title in a non-ASCII
   script was refused with `title must be 1..200 characters`. All four now count Unicode code

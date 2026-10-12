@@ -50,11 +50,11 @@ Field constraints:
 | `urgency` | string | yes | one of `blocker`, `normal`, `fyi`; default `normal` |
 | `status` | string | yes | one of `open`, `resolved`, `closed` |
 | `filed_by` | string\|null | no | free-form; ≤256 chars per MCP argument; see §10 |
-| `recipient` | string\|null | no | free-form 1..1024 chars, non-whitespace; opaque agent-to-agent label (e.g. `agent:data-prep`, `human:andrew`, `team:reviewers`); absent = implicit human ("the user of this .ask/"); see §13 |
+| `recipient` | string\|null | no | free-form 1..1024 chars (Unicode code points), non-whitespace; opaque agent-to-agent label (e.g. `agent:data-prep`, `human:andrew`, `team:reviewers`); absent = implicit human ("the user of this .ask/"); see §13 |
 | `tracker_ref` | string\|null | no | free-form; ≤256 chars per MCP argument |
 | `verifier` | object\|null | no | see §1.2 |
 | `links` | array | yes | array of `{label,url}` objects; empty array if none; max 32 links; `label` 1..120 chars; `url` 1..2048 chars; URL is not validated beyond non-empty |
-| `blocks` | array | yes | array of opaque cross-tool refs (strings) this ask is blocking; empty array if none; each ref 1..1024 chars, non-whitespace (no further format constraint — ask never interprets the value, orchestrators do). Typical refs are `act-XXXX` ids but any string is accepted. |
+| `blocks` | array | yes | array of opaque cross-tool refs (strings) this ask is blocking; empty array if none; each ref 1..1024 chars (Unicode code points), non-whitespace (no further format constraint — ask never interprets the value, orchestrators do). Typical refs are `act-XXXX` ids but any string is accepted. |
 | `resolution_note` | string\|null | no | ≤16384 chars per MCP argument |
 | `verification_output` | string\|null | no | ≤65536 chars; longer values are truncated with a trailing `\n[truncated]\n` marker |
 | `created_at` | string | yes | RFC 3339 UTC with `Z` suffix and nanosecond precision when nonzero, otherwise second precision (Go default for `time.Time.MarshalJSON` with UTC) |
@@ -62,7 +62,7 @@ Field constraints:
 | `verified_at` | string\|null | no | RFC 3339 UTC |
 | `closed_at` | string\|null | no | RFC 3339 UTC |
 
-**Which limits bind where.** The CLI enforces the `title` limit and the 1..1024 limit on each `blocks` ref and on `recipient`. It applies no length cap to the free-text fields: `body`, `filed_by`, `tracker_ref`, the verifier command, and the note or reason behind `resolution_note`. Those caps are limits of the MCP boundary (§5.1), applied to each argument a client sends, and are not a property of a stored item: an item filed or edited through the CLI may hold a longer value, and every reader must accept one. The CLI is left unbounded on purpose. Agents do file long bodies (two of 789 live items measured on 2026-10-12 had bodies over 16384 characters, the longest 24388), and an ask refused at filing time is the worst failure this tool can have: the item that needed a human is simply lost.
+**Which limits bind where.** The CLI enforces the `title` limit and the 1..1024 limit on each `blocks` ref and on `recipient`. Those three are counted in characters (Unicode code points), not bytes, and `ask new` and `ask_new` apply them through the same validators, so 1024 characters in any script is accepted on both and 1025 is refused on both (exit / code 2, `blocks: ref exceeds 1024 characters`, nothing written). The CLI applies no length cap to the free-text fields: `body`, `filed_by`, `tracker_ref`, the verifier command, and the note or reason behind `resolution_note`. Those caps are limits of the MCP boundary (§5.1), applied to each argument a client sends, and are not a property of a stored item: an item filed or edited through the CLI may hold a longer value, and every reader must accept one. The CLI is left unbounded on purpose. Agents do file long bodies (two of 789 live items measured on 2026-10-12 had bodies over 16384 characters, the longest 24388), and an ask refused at filing time is the worst failure this tool can have: the item that needed a human is simply lost.
 
 ### 1.1.1 `schema_version`
 

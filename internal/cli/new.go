@@ -171,13 +171,13 @@ func flagWasSet(fs *flag.FlagSet, name string) bool {
 // never interprets the format — so we want a sane upper bound that
 // permits long synthetic ids and short URLs without inviting body-sized
 // payloads. 1024 matches the convention sketched in act-2a1b.
-const maxBlocksRefLen = 1024
+const maxBlocksRefLen = core.MaxRefLen
 
 // maxRecipientRefLen caps a `recipient` ref. Same bound as a single
 // blocks ref — both are opaque cross-system strings ask never
 // interprets, and 1024 is comfortably above any sensible identifier
 // scheme (`agent:<name>`, `human:<handle>`, `team:<id>`, URLs, ULIDs).
-const maxRecipientRefLen = 1024
+const maxRecipientRefLen = core.MaxRefLen
 
 // validateRecipientRef enforces the rules for a single `--recipient`
 // value: non-empty after a whitespace trim and within the per-ref
@@ -186,29 +186,23 @@ const maxRecipientRefLen = 1024
 // (errorMessage, false) on the first failure, ("", true) on success.
 // The error string is shaped to be wrapped with the verb prefix at the
 // caller (e.g. `ask new: ...`).
+//
+// The rule itself is core.ValidateRef, shared with the MCP ask_new tool:
+// the cap counts characters (Unicode code points), not bytes.
 func validateRecipientRef(ref string) (string, bool) {
-	if strings.TrimSpace(ref) == "" {
-		return "recipient: ref must not be empty or whitespace-only", false
-	}
-	if len(ref) > maxRecipientRefLen {
-		return fmt.Sprintf("recipient: ref exceeds %d characters", maxRecipientRefLen), false
-	}
-	return "", true
+	return core.ValidateRef("recipient", ref)
 }
 
 // validateBlocksRefs enforces the per-ref rules for the `blocks` slice:
 // each ref must be non-empty after a whitespace trim (rejects ""s and
-// whitespace-only refs) and must not exceed maxBlocksRefLen characters.
-// Returns (errorMessage, false) on the first failure, ("", true) on
-// success. The error string is shaped to be wrapped with the verb prefix
-// at the caller (e.g. `ask new: ...`).
+// whitespace-only refs) and must not exceed maxBlocksRefLen characters
+// (core.ValidateRef). Returns (errorMessage, false) on the first
+// failure, ("", true) on success. The error string is shaped to be
+// wrapped with the verb prefix at the caller (e.g. `ask new: ...`).
 func validateBlocksRefs(refs []string) (string, bool) {
 	for _, r := range refs {
-		if strings.TrimSpace(r) == "" {
-			return "blocks: ref must not be empty or whitespace-only", false
-		}
-		if len(r) > maxBlocksRefLen {
-			return fmt.Sprintf("blocks: ref exceeds %d characters", maxBlocksRefLen), false
+		if msg, ok := core.ValidateRef("blocks", r); !ok {
+			return msg, false
 		}
 	}
 	return "", true
