@@ -80,6 +80,11 @@ func idguardSameTree(t *testing.T, before, after map[string]string) {
 		}
 	}
 	for name := range after {
+		// The store's advisory lock file is created by any locked write
+		// path; it holds no item data and is not what these tests guard.
+		if filepath.Base(name) == ".lock" {
+			continue
+		}
 		if _, ok := before[name]; !ok {
 			t.Errorf("%s was created", name)
 		}

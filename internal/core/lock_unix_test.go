@@ -32,7 +32,10 @@ func TestLockTimeout(t *testing.T) {
 	if err := s.Save(item); err != nil {
 		t.Fatal(err)
 	}
-	path := s.itemPath(item.ID)
+	path, err := s.itemPath(item.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	before, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
