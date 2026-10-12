@@ -39,6 +39,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a human's inbox.
 
 ### Fixed
+- The store refuses any item id that is not exactly `ask-` plus four lowercase hex characters,
+  the shape it generates. It used to accept any path-safe string, so on a case-insensitive
+  filesystem (the macOS default) `ask harvest` from a store holding `ASK-AAAA.json` passed the
+  collision check and silently overwrote the target's `ask-aaaa.json`. Harvest now refuses the
+  whole run (exit 5, nothing copied, every bad id named), and `ask list` skips a stray
+  non-conforming file in `items/` with the usual per-id warning.
 - Two writers of one item can no longer overwrite each other. `resolve`, `reopen`, `close`
   and `update` (and the MCP `ask_resolve` / `ask_reopen` / `ask_close` / `ask_update` tools) loaded an
   item,

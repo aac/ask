@@ -389,15 +389,15 @@ func TestListRecipientFilterHit(t *testing.T) {
 	other := "agent:other"
 	seedStore(t, dir,
 		&core.Item{
-			ID: "ask-r001", Title: "for-dprep", Urgency: core.UrgencyNormal,
+			ID: "ask-e001", Title: "for-dprep", Urgency: core.UrgencyNormal,
 			Status: core.StatusOpen, CreatedAt: base, Recipient: &dprep,
 		},
 		&core.Item{
-			ID: "ask-r002", Title: "for-other", Urgency: core.UrgencyNormal,
+			ID: "ask-e002", Title: "for-other", Urgency: core.UrgencyNormal,
 			Status: core.StatusOpen, CreatedAt: base.Add(time.Hour), Recipient: &other,
 		},
 		&core.Item{
-			ID: "ask-r003", Title: "no-recipient", Urgency: core.UrgencyNormal,
+			ID: "ask-e003", Title: "no-recipient", Urgency: core.UrgencyNormal,
 			Status: core.StatusOpen, CreatedAt: base.Add(2 * time.Hour),
 		},
 	)
@@ -429,15 +429,15 @@ func TestListRecipientFilterRepeatable(t *testing.T) {
 	c := "agent:c"
 	seedStore(t, dir,
 		&core.Item{
-			ID: "ask-r101", Title: "alpha", Urgency: core.UrgencyNormal,
+			ID: "ask-e101", Title: "alpha", Urgency: core.UrgencyNormal,
 			Status: core.StatusOpen, CreatedAt: base, Recipient: &a,
 		},
 		&core.Item{
-			ID: "ask-r102", Title: "beta", Urgency: core.UrgencyNormal,
+			ID: "ask-e102", Title: "beta", Urgency: core.UrgencyNormal,
 			Status: core.StatusOpen, CreatedAt: base.Add(time.Hour), Recipient: &b,
 		},
 		&core.Item{
-			ID: "ask-r103", Title: "gamma", Urgency: core.UrgencyNormal,
+			ID: "ask-e103", Title: "gamma", Urgency: core.UrgencyNormal,
 			Status: core.StatusOpen, CreatedAt: base.Add(2 * time.Hour), Recipient: &c,
 		},
 	)

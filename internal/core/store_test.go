@@ -78,7 +78,7 @@ func TestStoreAtomicRename(t *testing.T) {
 // ErrIDNotFound sentinel so the CLI can map it to exit code 3 (spec §4.3).
 func TestStoreLoadMissingReturnsSentinel(t *testing.T) {
 	s := tempStore(t)
-	_, err := s.Load("ask-nope")
+	_, err := s.Load("ask-0000")
 	if err == nil {
 		t.Fatal("expected error for missing id, got nil")
 	}

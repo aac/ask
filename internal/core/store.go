@@ -36,9 +36,10 @@ const (
 var ErrNotInitialized = errors.New("ask not initialized")
 
 // ErrInvalidID is returned by every FileStore method that turns an id into
-// a path when the id is not a plain file-name stem: empty, `.`, or
-// containing a path separator, `..`, or a NUL. Such an id could address a
-// file outside .ask/items/, so it is refused before any path is built.
+// a path when the id is not exactly the generated shape (spec §1.1,
+// `^ask-[0-9a-f]{4}$`). Such an id could address a file outside
+// .ask/items/, or — differing only in case — another item's file, so it
+// is refused before any path is built.
 var ErrInvalidID = errors.New("invalid ask id")
 
 // ErrIDMismatch is returned by Load when an item file's `id` member is not
@@ -151,14 +152,21 @@ func (s *FileStore) SaveConfig(cfg *ProjectConfig) error {
 	return nil
 }
 
-// checkID refuses an id that is not a plain file-name stem. It is the
-// path-safety check behind itemPath, deliberately looser than the §4.1
-// shape (`ask-` + 4 hex): it only guarantees <id>.json names a file
-// directly inside .ask/items/. Both separators are refused on every
-// platform so a store is judged the same wherever it is read.
+// checkID refuses any id that is not exactly the shape NewID generates
+// (spec §1.1, `^ask-[0-9a-f]{4}$`): idPrefix followed by idHexLen
+// lowercase hex characters, nothing else. It is the check behind itemPath,
+// so Load, Save and harvest's delete all refuse anything else. The exact
+// shape is also the path-safety guarantee (no separator, dot or NUL can
+// appear), and lowercase-only is what keeps two ids from naming one file
+// on a case-insensitive filesystem (act-1e046d).
 func checkID(id string) error {
-	if id == "" || id == "." || strings.Contains(id, "..") || strings.ContainsAny(id, "/\\\x00") {
+	if len(id) != len(idPrefix)+idHexLen || !strings.HasPrefix(id, idPrefix) {
 		return fmt.Errorf("%w %q", ErrInvalidID, id)
+	}
+	for _, c := range []byte(id[len(idPrefix):]) {
+		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
+			return fmt.Errorf("%w %q", ErrInvalidID, id)
+		}
 	}
 	return nil
 }
@@ -244,7 +252,7 @@ func (s *FileStore) Save(item *Item) error {
 // is not CurrentSchemaVersion returns a wrapped ErrUnsupportedSchemaVersion
 // (CLI maps both to exit 5 per spec §1.1.1, §7). So does a file whose `id`
 // member is not id itself (ErrIDMismatch): the returned item's ID always
-// equals the id asked for. An id that is not a plain file-name stem is
+// equals the id asked for. An id that is not in the generated shape is
 // refused with ErrInvalidID before the filesystem is touched.
 func (s *FileStore) Load(id string) (*Item, error) {
 	path, err := s.itemPath(id)
