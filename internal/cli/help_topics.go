@@ -204,7 +204,8 @@ const mcpTopic = `ask help mcp — MCP tools and an example transcript
 
 ask mcp starts a stdio JSON-RPC 2.0 server speaking MCP protocol
 2024-11-05. Server name: ask-mcp. The server exposes one tool per CLI
-verb except init (init is a developer action, not an agent action).
+verb an agent uses on an item (init and harvest are developer actions
+on the store, not agent actions, and stay CLI-only).
 Tool shapes mirror the CLI flags; semantics are identical in both
 directions.
 
@@ -256,6 +257,12 @@ Tools
     Args: id (required) — any non-empty hex prefix, with or without
     the "ask-" prefix.
     Returns: the Item object.
+
+  ask_update
+    Args: id (required), plus title and/or one of body (replace; an
+    empty string clears it) or body_append (add a note after a blank
+    line). Corrects the text in place; makes no state transition.
+    Returns: the updated Item object.
 
   ask_resolve
     Args: id (required), note (optional string).

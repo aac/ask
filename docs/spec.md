@@ -322,7 +322,7 @@ Implements act's prefix-resolution policy:
 
 ### 5.1 Common conventions
 
-- Tool names: `ask_new`, `ask_list`, `ask_show`, `ask_resolve`, `ask_reopen`, `ask_close`. (`ask_init` is **not** exposed via MCP in v1 — initialization is a developer action, not an agent action.)
+- Tool names: `ask_new`, `ask_list`, `ask_show`, `ask_update`, `ask_resolve`, `ask_reopen`, `ask_close`. (`init` and `harvest` are **not** exposed via MCP — setting up or administering a store is a developer action, not something an agent does to an item mid-loop.)
 - Required vs optional in each schema mirrors CLI requiredness.
 - Response framing: every tool returns `{ "content": [{ "type": "text", "text": "<json>" }], "isError": false }` where `<json>` is the same payload the CLI emits with `--json`. The JSON-encoded payload is in the `text` field (single-string convention; agents JSON-parse the `text`).
 
@@ -444,6 +444,32 @@ All four take `id` as the required arg. `resolve` accepts an optional `note`; `r
 
 Return: the post-transition (or current, for `ask_show`) Item object (§1.5 / §1.8).
 
+### 5.4.1 `ask_update`
+
+The MCP twin of `ask update` (§1.8.1): corrects `title` and/or `body` in place, makes no state transition, allowed in any status.
+
+```json
+{
+  "type": "object",
+  "required": ["id"],
+  "additionalProperties": false,
+  "properties": {
+    "id":          { "type": "string", "minLength": 1 },
+    "title":       { "type": "string", "minLength": 1, "maxLength": 200 },
+    "body":        { "type": "string", "maxLength": 16384 },
+    "body_append": { "type": "string", "maxLength": 16384 }
+  }
+}
+```
+
+- `title` replaces the title (same validation and trimming as `--title`).
+- `body` replaces the body; an explicit empty string clears it, an omitted field leaves it alone.
+- `body_append` appends after a blank line, as `--body-append`.
+- `body` and `body_append` together are a validation error (code 2), as is a call naming none of the three.
+- `--body-file` / `--body-append-file` have no twin: an MCP caller already holds the text.
+
+Return: the updated Item object. When the item already reads as requested, no write happens and the call returns the §5.5 no-op envelope, with `content[1].text == "ask update: <id> already reads as requested"`.
+
 ### 5.5 MCP error envelope
 
 On any non-success outcome, the tool returns:
@@ -462,7 +488,7 @@ On any non-success outcome, the tool returns:
 - Idempotent no-ops (code 6) are returned as `isError: false` with the item payload **and** an additional `content` text element containing the warning, mirroring the CLI's stdout-success-plus-stderr-warning pattern. (Justification: an MCP-side warning that arrives as `isError: true` is the wrong affordance — the call succeeded.) Concretely:
   - The `content` array has exactly two entries, both `type: "text"`.
   - `content[0].text` is the JSON-encoded post-call Item (identical to the active-transition success body), so clients parsing `content[0]` always get an Item regardless of whether the call was a real transition or a no-op.
-  - `content[1].text` is the verbatim warning string `ask <verb>: already <status>`, matching the CLI's stderr line and serving as the structured no-op signal an orchestrator/verifier can match on without diffing item state.
+  - `content[1].text` is the verbatim warning string `ask <verb>: already <status>` (for `ask_update`: `ask update: <id> already reads as requested`), matching the CLI's stderr line and serving as the structured no-op signal an orchestrator/verifier can match on without diffing item state.
   - Example for `ask_resolve` on an already-resolved item: `content[1].text == "ask resolve: already resolved"`.
 
 JSON-RPC framing errors (malformed input, unknown method) are returned as JSON-RPC `error` objects per the spec (`-32600` etc.), not via the tool envelope.

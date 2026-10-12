@@ -36,8 +36,13 @@ rules, and move it when you find it misfiled:
   stamps, and commits them at release time via `stage-binaries`) — see Releasing below.
 - **MCP is implemented in-tree** (no external library), following the in-binary server
   pattern — the MCP tools mirror the CLI's lifecycle verbs (`ask_new`, `ask_list`, …).
-  `init`, `harvest` and `update` are CLI-only; adding an MCP twin is a deliberate call per
-  verb, not an automatic consequence of adding a subcommand.
+  The rule for a new verb: it gets an MCP twin when it is something an agent does to an
+  existing item in the middle of its own loop (file, read, correct, transition); verbs
+  that set up or administer a store (`init`, `harvest`) stay CLI-only. `ask_update` is the
+  worked case: agents drive ask through MCP more than the shell, and without the twin the
+  only way to correct a rotted ask from there was hand-editing `.ask/items/<id>.json` —
+  the failure `ask update` was built to remove. The counter-pressure is a small tool
+  surface: a new verb has to pass that test, it does not get a twin automatically.
 - **This repo dogfoods ask on its own backlog.** Mid-flight discoveries about ask itself are
   common; file them and keep working — that's the dogfood signal.
 - **The skill tree is plain files at `skills/ask/`**, shipped with the plugin and

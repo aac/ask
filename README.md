@@ -93,7 +93,7 @@ still needs a human stays open.
 
 `ask` exposes its full surface as an [MCP](https://modelcontextprotocol.io) server
 (`ask mcp`, stdio transport). MCP tools cover the lifecycle verbs — `ask_new`, `ask_list`,
-`ask_resolve`, `ask_reopen`, `ask_close`, `ask_show` — so any MCP-aware agent (Claude Code,
+`ask_resolve`, `ask_reopen`, `ask_close`, `ask_show`, `ask_update` — so any MCP-aware agent (Claude Code,
 Codex, custom SDK apps) can drive the loop through tool calls instead of shelling out. The
 CLI is always available as the base surface: every operation is an `ask` subcommand, so any
 agent that can run a shell command drives the full loop with no extra setup.

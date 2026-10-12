@@ -83,7 +83,7 @@ ask is human-recipient by default; items without `--recipient` target the implic
 
 ## Correcting an ask that's still open
 
-An ask whose text has rotted — a relative date that no longer means anything, a path that moved, a decision that landed since — gets **corrected**, not closed. `ask update <id> --body-append "2026-08-02: still open; 'tomorrow' meant 2026-05-14"` appends a dated note to the body in one command, leaving status, timestamps and every other field alone. `--title`, `--body` (replace), `--body-file` and `--body-append-file` (`-` = stdin) are there too, and the flags mirror `act update`.
+An ask whose text has rotted — a relative date that no longer means anything, a path that moved, a decision that landed since — gets **corrected**, not closed. `ask update <id> --body-append "2026-08-02: still open; 'tomorrow' meant 2026-05-14"` appends a dated note to the body in one command, leaving status, timestamps and every other field alone. `--title`, `--body` (replace), `--body-file` and `--body-append-file` (`-` = stdin) are there too, and the flags mirror `act update`. Over MCP the same correction is `ask_update` (`id`, plus `title`, `body` or `body_append`).
 
 Two things not to do: don't edit `.ask/items/<id>.json` by hand (the store's one-file-per-item shape makes it look safe, and a format change breaks every habit built on it), and never resolve-and-refile an ask that still needs the human — that destroys the item's history and closes something nobody has done.
 
