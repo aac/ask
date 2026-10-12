@@ -46,32 +46,12 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-# ---- pre-flight: binaries and feature detection ----------------------------
+# ---- pre-flight: binaries ---------------------------------------------------
 
 STEP="pre-flight: binaries on PATH"
 command -v ask >/dev/null 2>&1 || envfail "ask binary not on PATH"
 command -v act >/dev/null 2>&1 || envfail "act binary not on PATH"
 command -v git >/dev/null 2>&1 || envfail "git not on PATH"
-
-STEP="pre-flight: ask --blocks flag on new + list"
-# Capture --help output into a variable so SIGPIPE from `grep -q` cannot
-# trip pipefail. (grep exits 0 on match, kills the producer with SIGPIPE,
-# producer exits 141, pipefail propagates the 141 — confusing failure mode.)
-ASK_NEW_HELP=$(ask new --help 2>&1 || true)
-ASK_LIST_HELP=$(ask list --help 2>&1 || true)
-ACT_UPDATE_HELP=$(act update --help 2>&1 || true)
-ACT_DEPADD_HELP=$(act dep add --help 2>&1 || true)
-
-case "$ASK_NEW_HELP"   in (*-blocks*)  ;; (*) missing "ask new --blocks (file the ask with a cross-tool ref)" ;; esac
-case "$ASK_LIST_HELP"  in (*-blocks*)  ;; (*) missing "ask list --blocks (filter by blocked ref)" ;; esac
-
-STEP="pre-flight: act dep add --external (add) + act update --ext-rm (clear) flags"
-# act-ce1427 unified external-blocker *adds* under `act dep add --external`
-# (symmetric with --blocked-by); removal stays on `act update --ext-rm`.
-case "$ACT_DEPADD_HELP" in (*-external*) ;; (*) missing "act dep add --external (register external dep)" ;; esac
-case "$ACT_UPDATE_HELP" in (*-ext-rm*)   ;; (*) missing "act update --ext-rm (clear external dep)"  ;; esac
-
-ok "binaries present and advertise the new flags"
 
 # ---- scratch environment ----------------------------------------------------
 
@@ -91,6 +71,33 @@ STEP="setup: ask init"
 ask init >/dev/null 2>&1 || envfail "ask init failed in tempdir"
 
 ok "scratch tempdir initialized at $TMPDIR_ROOT"
+
+# ---- pre-flight: feature detection (inside the scratch repo) ---------------
+
+STEP="pre-flight: ask --blocks flag on new + list"
+# These probes run inside the scratch repo, never the caller's cwd: act refuses
+# even `--help` in a directory with no act state, and the empty help text would
+# then read as "flag absent" — a false exit 2 from any directory that is not
+# act-initialized (a git worktree of this repo, for one).
+#
+# Capture --help output into a variable so SIGPIPE from `grep -q` cannot
+# trip pipefail. (grep exits 0 on match, kills the producer with SIGPIPE,
+# producer exits 141, pipefail propagates the 141 — confusing failure mode.)
+ASK_NEW_HELP=$(ask new --help 2>&1 || true)
+ASK_LIST_HELP=$(ask list --help 2>&1 || true)
+ACT_UPDATE_HELP=$(act update --help 2>&1 || true)
+ACT_DEPADD_HELP=$(act dep add --help 2>&1 || true)
+
+case "$ASK_NEW_HELP"   in (*-blocks*)  ;; (*) missing "ask new --blocks (file the ask with a cross-tool ref)" ;; esac
+case "$ASK_LIST_HELP"  in (*-blocks*)  ;; (*) missing "ask list --blocks (filter by blocked ref)" ;; esac
+
+STEP="pre-flight: act dep add --external (add) + act update --ext-rm (clear) flags"
+# act-ce1427 unified external-blocker *adds* under `act dep add --external`
+# (symmetric with --blocked-by); removal stays on `act update --ext-rm`.
+case "$ACT_DEPADD_HELP" in (*-external*) ;; (*) missing "act dep add --external (register external dep)" ;; esac
+case "$ACT_UPDATE_HELP" in (*-ext-rm*)   ;; (*) missing "act update --ext-rm (clear external dep)"  ;; esac
+
+ok "binaries advertise the new flags"
 
 # ---- step 1: create the scratch act issue ----------------------------------
 
