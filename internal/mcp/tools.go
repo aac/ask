@@ -149,7 +149,7 @@ func tools() []toolDescriptor {
 		},
 		{
 			Name:        "ask_list",
-			Description: "List asks. Defaults to status != closed; pass `all: true` for every state (spec §3, §5.3). An item file that cannot be read is skipped: the array of readable items is content[0], and each skipped id adds a text part `ask list: skipped <id>: <reason>`.",
+			Description: "List asks. Defaults to status != closed; pass `all: true` for every state (spec §3, §5.3). An item file that cannot be read is skipped: the array of readable items is content[0], each skipped id adds a text part `ask list: skipped <id>: <reason>`, and the result's `_meta` carries the same skips as data: `\"ask/skipped\": [{\"id\", \"reason\"}]` (no `_meta` when nothing was skipped).",
 			InputSchema: map[string]any{
 				"type":                 "object",
 				"additionalProperties": false,
@@ -428,18 +428,35 @@ type listArgs struct {
 // returned with isError=false, the array in content[0] and then one extra
 // text part per skipped id carrying the line the CLI writes to stderr
 // (`ask list: skipped <id>: <reason>`) — the §5.5 success-plus-warning
-// shape. When files were skipped and no item at all was readable, the
-// call is a code-5 error whose message names every skipped id.
-func callList(repoRoot string, raw json.RawMessage) ([]toolContent, bool) {
+// shape. The same skips are returned as data for the result's `_meta`,
+// under `ask/skipped`: one {id, reason} per skipped id in the same order,
+// reason being the text that follows `skipped <id>: ` in the prose line.
+// meta is nil when nothing was skipped, so the result then has no `_meta`
+// key. When files were skipped and no item at all was readable, the call
+// is a code-5 error whose message names every skipped id, with no meta.
+func callList(repoRoot string, raw json.RawMessage) (parts []toolContent, meta map[string]any, isErr bool) {
 	body, skipped, isErr := listBody(repoRoot, raw)
-	parts := textContent(body)
-	if isErr {
-		return parts, true
+	parts = textContent(body)
+	if isErr || len(skipped) == 0 {
+		return parts, nil, isErr
 	}
-	for _, sk := range skipped {
+	entries := make([]skippedMeta, len(skipped))
+	for i, sk := range skipped {
 		parts = append(parts, toolContent{Type: "text", Text: "ask list: " + sk.String()})
+		entries[i] = skippedMeta{ID: sk.ID, Reason: sk.Err.Error()}
 	}
-	return parts, false
+	return parts, map[string]any{metaSkippedKey: entries}, false
+}
+
+// metaSkippedKey is the `_meta` key ask_list reports skipped item files
+// under (spec §7.2).
+const metaSkippedKey = "ask/skipped"
+
+// skippedMeta is one entry of `_meta["ask/skipped"]`: the filename id of
+// an item file ask_list could not read, and why.
+type skippedMeta struct {
+	ID     string `json:"id"`
+	Reason string `json:"reason"`
 }
 
 // listBody returns the JSON body for ask_list (the item array, or an

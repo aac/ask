@@ -126,10 +126,14 @@ type toolDescriptor struct {
 // toolResult is the tools/call response envelope (spec §5.1). Content is a
 // list of content parts; we use a single text part containing the JSON
 // body of the underlying tool. IsError signals to MCP clients that the
-// tool returned an error envelope rather than a successful result.
+// tool returned an error envelope rather than a successful result. Meta
+// is the protocol's own extension slot on a result (`_meta`); the key is
+// absent unless a tool has something to put there, and only ask_list does
+// (spec §7.2: `ask/skipped`).
 type toolResult struct {
-	Content []toolContent `json:"content"`
-	IsError bool          `json:"isError,omitempty"`
+	Content []toolContent  `json:"content"`
+	IsError bool           `json:"isError,omitempty"`
+	Meta    map[string]any `json:"_meta,omitempty"`
 }
 
 // toolContent is one content part. Only "text" parts are produced.
@@ -265,17 +269,20 @@ func (s *Server) handleToolsCall(ctx context.Context, enc *json.Encoder, req jso
 	if len(args) == 0 {
 		args = []byte("{}")
 	}
-	content, isErr := s.invoke(p.Name, args)
+	content, meta, isErr := s.invoke(p.Name, args)
 	tr := toolResult{
 		Content: content,
 		IsError: isErr,
+		Meta:    meta,
 	}
 	s.writeResult(enc, req.ID, tr)
 }
 
 // invoke is the central tool dispatcher. It returns the list of content
-// parts that should populate the toolResult envelope's `content` field
-// and a flag indicating whether the call resulted in an error envelope.
+// parts that should populate the toolResult envelope's `content` field,
+// the envelope's `_meta` (nil for every call but an ask_list that skipped
+// item files), and a flag indicating whether the call resulted in an
+// error envelope.
 //
 // Most tool calls return a single text content part carrying either the
 // JSON-encoded success body or the spec §5.5 {code, message} error
@@ -286,32 +293,33 @@ func (s *Server) handleToolsCall(ctx context.Context, enc *json.Encoder, req jso
 // isError=false because the call succeeded — the warning is an
 // MCP-idiomatic affordance, not an error. ask_list uses the same shape
 // for item files it had to skip: the array, then one warning part per
-// skipped id (spec §7.2).
+// skipped id, and the same skips as data in `_meta` (spec §7.2).
 //
 // Unknown tool names return a spec §5.5-style error envelope with
 // code=2 (validation) so the client's framing remains consistent with
 // regular tool errors.
-func (s *Server) invoke(name string, args json.RawMessage) ([]toolContent, bool) {
+func (s *Server) invoke(name string, args json.RawMessage) (content []toolContent, meta map[string]any, isErr bool) {
 	switch name {
 	case "ask_new":
 		body, isErr := callNew(s.repoRoot, args)
-		return textContent(body), isErr
+		return textContent(body), nil, isErr
 	case "ask_list":
 		return callList(s.repoRoot, args)
 	case "ask_show":
 		body, isErr := callShow(s.repoRoot, args)
-		return textContent(body), isErr
+		return textContent(body), nil, isErr
 	case "ask_update":
-		return callUpdate(s.repoRoot, args)
+		content, isErr = callUpdate(s.repoRoot, args)
 	case "ask_resolve":
-		return callResolve(s.repoRoot, args)
+		content, isErr = callResolve(s.repoRoot, args)
 	case "ask_reopen":
-		return callReopen(s.repoRoot, args)
+		content, isErr = callReopen(s.repoRoot, args)
 	case "ask_close":
-		return callClose(s.repoRoot, args)
+		content, isErr = callClose(s.repoRoot, args)
 	default:
-		return textContent(encodeErr(2, fmt.Sprintf("ask mcp: unknown tool %q", name))), true
+		return textContent(encodeErr(2, fmt.Sprintf("ask mcp: unknown tool %q", name))), nil, true
 	}
+	return content, nil, isErr
 }
 
 // textContent wraps a single JSON-encoded body string in the canonical
