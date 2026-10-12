@@ -490,7 +490,7 @@ On any non-success outcome, the tool returns:
 }
 ```
 
-- `code` is the exit-code taxonomy value (§2): 2/3/4/5/6/7.
+- `code` is the exit-code taxonomy value (§2), and is always one of `2`, `3`, `4`, `5`, `7` — the codes a tool call can fail with. It is never `6`: an idempotent no-op is a success (next bullet) and carries no error envelope, so `6` exists only as a CLI exit status.
 - `message` is the same human-readable string the CLI would have printed to stderr.
 - Idempotent no-ops (code 6) are returned as `isError: false` with the item payload **and** an additional `content` text element containing the warning, mirroring the CLI's stdout-success-plus-stderr-warning pattern. (Justification: an MCP-side warning that arrives as `isError: true` is the wrong affordance — the call succeeded.) Concretely:
   - The `content` array has exactly two entries, both `type: "text"`.

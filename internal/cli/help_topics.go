@@ -294,9 +294,16 @@ Error envelope
     { "content": [{ "type":"text",
                     "text":"{\"code\":3,\"message\":\"ask-9999: not found\"}" }],
       "isError": true }
-  code mirrors the CLI exit-code taxonomy (2,3,4,5). Idempotent no-ops
-  (code 6) come back as isError:false with the item payload plus an
-  extra text element containing the warning — the call succeeded.
+  code is one of the CLI exit codes a tool call can fail with:
+    2  validation error (bad or over-length argument, unknown tool,
+       refused transition)
+    3  id not found
+    4  ambiguous id prefix
+    5  I/O error, or no .ask/ here (run ask init)
+    7  stranded store: item files present, config.json missing
+  code is never 6. An idempotent no-op (CLI exit 6) is a success: no
+  error envelope, no isError, the item payload plus an extra text
+  element containing the warning.
 
 Example transcript
 

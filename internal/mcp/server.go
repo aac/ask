@@ -139,8 +139,9 @@ type toolContent struct {
 }
 
 // errEnvelope is the spec §5.5 error shape: {code, message}. code is the
-// CLI exit-code taxonomy value (§2): 2/3/4/5/6. The CLI's stderr message
-// is reused verbatim for message.
+// CLI exit-code taxonomy value (§2) and is always one of 2/3/4/5/7 — never
+// 6, since an idempotent no-op is a success and has no error envelope.
+// The CLI's stderr message is reused verbatim for message.
 type errEnvelope struct {
 	Code    int    `json:"code"`
 	Message string `json:"message"`

@@ -92,6 +92,105 @@ func TestIsErrorOmittedOnSuccess(t *testing.T) {
 	})
 }
 
+// mcpdriftErrCode returns the code of a single-part error envelope.
+func mcpdriftErrCode(t *testing.T, tr toolResult) int {
+	t.Helper()
+	if !tr.IsError || len(tr.Content) != 1 {
+		t.Fatalf("want a single-part error, got isError=%v with %d part(s)", tr.IsError, len(tr.Content))
+	}
+	var env errEnvelope
+	if err := json.Unmarshal([]byte(tr.Content[0].Text), &env); err != nil {
+		t.Fatalf("decode error envelope: %v\nbody: %.200s", err, tr.Content[0].Text)
+	}
+	return env.Code
+}
+
+// TestErrorCodesReachableOverMCP drives each code spec §5.5 and
+// `ask help mcp` list — 2, 3, 4, 5, 7 — out of the real server, so the
+// documented list is checked against the wire rather than against itself.
+func TestErrorCodesReachableOverMCP(t *testing.T) {
+	root := t.TempDir()
+	initRepo(t, root)
+	// Two ids sharing the "ask-" stem make the bare prefix ambiguous once
+	// both exist; file a few so at least two share a first hex digit.
+	var ids []string
+	for i := 0; i < 17; i++ {
+		ids = append(ids, mcpupdNew(t, root, "item "+strings.Repeat("i", i+1), "", i+1).ID)
+	}
+	ambiguous := ""
+	seen := map[string]bool{}
+	for _, id := range ids {
+		p := id[:len("ask-")+1]
+		if seen[p] {
+			ambiguous = p
+			break
+		}
+		seen[p] = true
+	}
+	if ambiguous == "" {
+		t.Fatalf("17 ids with no shared first hex digit: %v", ids)
+	}
+
+	if got := mcpdriftErrCode(t, mcpdriftCall(t, root, "ask_new", map[string]any{"title": ""})); got != 2 {
+		t.Errorf("validation error: code %d want 2", got)
+	}
+	if got := mcpdriftErrCode(t, mcpdriftCall(t, root, "ask_show", map[string]any{"id": "ask-zzzz"})); got != 3 {
+		t.Errorf("unknown id: code %d want 3", got)
+	}
+	if got := mcpdriftErrCode(t, mcpdriftCall(t, root, "ask_show", map[string]any{"id": ambiguous})); got != 4 {
+		t.Errorf("ambiguous prefix %q: code %d want 4", ambiguous, got)
+	}
+	if got := mcpdriftErrCode(t, mcpdriftCall(t, t.TempDir(), "ask_list", map[string]any{})); got != 5 {
+		t.Errorf("no store: code %d want 5", got)
+	}
+
+	// Stranded: the items stay, config.json goes. Every tool reports 7.
+	if err := os.Remove(filepath.Join(root, ".ask", "config.json")); err != nil {
+		t.Fatalf("remove config.json: %v", err)
+	}
+	for _, td := range tools() {
+		args := mcpdriftBaseArgs(td.Name, ids[0])
+		if td.Name == "ask_update" {
+			args["title"] = "x"
+		}
+		if got := mcpdriftErrCode(t, mcpdriftCall(t, root, td.Name, args)); got != 7 {
+			t.Errorf("%s on a stranded store: code %d want 7", td.Name, got)
+		}
+	}
+}
+
+// TestNoopIsNeverCodeSix: the CLI's exit 6 has no MCP error code. Every
+// idempotent no-op is a success whose first part is the Item, not a
+// {code, message} envelope.
+func TestNoopIsNeverCodeSix(t *testing.T) {
+	root := t.TempDir()
+	initRepo(t, root)
+	it := mcpupdNew(t, root, "seed", "same", 1)
+	noops := []struct {
+		tool string
+		args map[string]any
+	}{
+		{"ask_reopen", map[string]any{"id": it.ID}},
+		{"ask_update", map[string]any{"id": it.ID, "body": "same"}},
+	}
+	for _, tc := range noops {
+		tr := mcpdriftCall(t, root, tc.tool, tc.args)
+		if tr.IsError || len(tr.Content) != 2 {
+			t.Fatalf("%s no-op: want success with 2 parts, got isError=%v parts=%d", tc.tool, tr.IsError, len(tr.Content))
+		}
+		var probe map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(tr.Content[0].Text), &probe); err != nil {
+			t.Fatalf("%s no-op: decode first part: %v", tc.tool, err)
+		}
+		if _, has := probe["code"]; has {
+			t.Errorf("%s no-op: first part is an error envelope (%s), want the Item", tc.tool, tr.Content[0].Text)
+		}
+		if _, has := probe["id"]; !has {
+			t.Errorf("%s no-op: first part is not an Item: %.120s", tc.tool, tr.Content[0].Text)
+		}
+	}
+}
+
 // mcpdriftSnapshot reads every item file in the store, keyed by file
 // name. Two equal snapshots mean no item was added, removed, or changed
 // by so much as a byte.
