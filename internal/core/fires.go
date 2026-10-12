@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -140,10 +141,24 @@ func (s *FileStore) appendFireLine(itemID string, line any) error {
 		return fmt.Errorf("%s is not a directory", dir)
 	}
 	// 0600: a result line holds handler output, which is not for other
-	// users of the host.
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY|syscall.O_NOFOLLOW, 0o600)
+	// users of the host. O_NONBLOCK so that a FIFO planted at the path
+	// fails the open instead of blocking a writer that holds the store
+	// lock; it changes nothing for a regular file.
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0o600)
 	if err != nil {
 		return fmt.Errorf("open %s: %w", path, err)
+	}
+	fi, err := f.Stat()
+	if err == nil && !fi.Mode().IsRegular() {
+		err = errors.New("not a regular file")
+	}
+	// The mode above only applies to a file this call created.
+	if err == nil && fi.Mode().Perm() != 0o600 {
+		err = f.Chmod(0o600)
+	}
+	if err != nil {
+		_ = f.Close()
+		return fmt.Errorf("fire record %s: %w", path, err)
 	}
 	_, werr := f.Write(b)
 	cerr := f.Close()

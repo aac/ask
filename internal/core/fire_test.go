@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -265,4 +266,60 @@ func TestFireRecordIsOwnerOnly(t *testing.T) {
 	if perm := fi.Mode().Perm(); perm != 0o600 {
 		t.Errorf("fire record mode %o, want 600", perm)
 	}
+}
+
+// TestFireRecordFileIsHeldToARegularOwnerOnlyFile: a record file that
+// already exists with wider permissions is tightened on the next append,
+// and something at the path that is not a regular file is refused without
+// blocking the writer, which holds the store lock.
+func TestFireRecordFileIsHeldToARegularOwnerOnlyFile(t *testing.T) {
+	resolve := func(it *Item, now time.Time) error { return Resolve(it, "", now) }
+
+	t.Run("existing wide file", func(t *testing.T) {
+		store, id := fireTestStore(t, []string{EventResolve})
+		dir := filepath.Join(store.Root(), firesSubdir)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		path := filepath.Join(dir, id+".jsonl")
+		if err := os.WriteFile(path, nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if ch, err := store.Mutate(id, time.Now().UTC(), resolve); err != nil || len(ch.Fires) != 1 {
+			t.Fatalf("resolve: change %+v, err %v", ch, err)
+		}
+		fi, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if perm := fi.Mode().Perm(); perm != 0o600 {
+			t.Errorf("fire record mode %o after an append, want 600", perm)
+		}
+	})
+
+	t.Run("fifo", func(t *testing.T) {
+		store, id := fireTestStore(t, []string{EventResolve})
+		dir := filepath.Join(store.Root(), firesSubdir)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := syscall.Mkfifo(filepath.Join(dir, id+".jsonl"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		done := make(chan struct{})
+		var ch *Change
+		var err error
+		go func() {
+			ch, err = store.Mutate(id, time.Now().UTC(), resolve)
+			close(done)
+		}()
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Fatal("resolve is blocked on a FIFO at the fire record path, holding the store lock")
+		}
+		if err != nil || !ch.Changed || len(ch.Fires) != 0 {
+			t.Errorf("resolve over a FIFO: change %+v, err %v", ch, err)
+		}
+	})
 }

@@ -151,8 +151,12 @@ func RunFire(projectRoot string, args []string) int {
 	if sub == nil {
 		return result(FireNotRun, nil, FireDetailSubRemoved, "")
 	}
-	// The subs file is read from disk, not trusted: the arguments become
+	// The subs file is read from disk, not trusted. The subscription has
+	// to name the event it is being run for, and its arguments become
 	// environment variable names and values.
+	if !sub.Names(event) {
+		return result(FireSpawnFailed, nil, FireDetailProtocolMismatch, "")
+	}
 	if err := ValidateSubArgs(sub.Args); err != nil {
 		return result(FireSpawnFailed, nil, err.Error(), "")
 	}
