@@ -46,12 +46,10 @@ func runNew(args []string) int {
 		fmt.Fprintln(os.Stderr, "ask new: title is required")
 		return 2
 	}
-	if len(title) > 200 {
-		fmt.Fprintln(os.Stderr, "ask new: title must be 1..200 characters")
-		return 2
-	}
-	if strings.ContainsAny(title, "\n\r") {
-		fmt.Fprintln(os.Stderr, "ask new: title must not contain newlines")
+	// Length (in characters) and newlines: the one core validator, shared
+	// with `ask update` and the MCP tools.
+	if msg, ok := validateTitle(title); !ok {
+		fmt.Fprintf(os.Stderr, "ask new: %s\n", msg)
 		return 2
 	}
 

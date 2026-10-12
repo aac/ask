@@ -1,6 +1,9 @@
 package core
 
-import "strings"
+import (
+	"strings"
+	"unicode/utf8"
+)
 
 // TextUpdate is an in-place correction to an item's title and/or body —
 // the edit behind `ask update` and the `ask_update` MCP tool. Both
@@ -51,7 +54,9 @@ func AppendBody(existing, addition string) string {
 }
 
 // ValidateTitle enforces the spec §1.1 title rules: non-empty after trim,
-// 1..200 characters, no newlines. Returns (errorMessage, false) on the
+// 1..200 characters, no newlines. Characters are Unicode code points, not
+// bytes, so the limit is the one the MCP schemas advertise as maxLength
+// and a 200-character title in any script is accepted. Returns (errorMessage, false) on the
 // first failure; the message is shaped to be wrapped with the verb prefix
 // at the caller.
 func ValidateTitle(title string) (string, bool) {
@@ -59,7 +64,7 @@ func ValidateTitle(title string) (string, bool) {
 	if t == "" {
 		return "title must not be empty", false
 	}
-	if len(t) > 200 {
+	if utf8.RuneCountInString(t) > 200 {
 		return "title must be 1..200 characters", false
 	}
 	if strings.ContainsAny(t, "\n\r") {
