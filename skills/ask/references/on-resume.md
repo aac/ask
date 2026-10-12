@@ -17,9 +17,9 @@ If verification surfaces reopens (verifier failed, item is back in `open` with `
 
 ## Orchestrator checkpoints
 
-If you're running a long work loop, poll `ask list --status=open --urgency=blocker` before claiming new work. A sibling agent (or the human via CLI) may have filed a blocker that should halt the loop. `ask help workflow` documents the full checkpoint convention, including:
+If you're running a long work loop, poll `ask list --status=open --urgency=blocker --strict` before claiming new work. A sibling agent (or the human via CLI) may have filed a blocker that should halt the loop. `ask help workflow` documents the full checkpoint convention, including:
 
-- **Before claiming new work in a long loop:** `ask list --status=open --urgency=blocker` — if non-empty, halt or address.
+- **Before claiming new work in a long loop:** `ask list --status=open --urgency=blocker --strict` — if non-empty, halt or address. `--strict` exits 5 when an unreadable item file was skipped, so an empty list with exit 0 really means no blockers.
 - **At session start:** `ask list --status=resolved` — run verifiers and close/reopen before doing anything else.
 - **Watching for a specific ask to close:** poll `ask show <id>` (or `ask list --status=closed`) at whatever cadence the loop tolerates.
 

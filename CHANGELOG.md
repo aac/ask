@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `ask list --strict` exits 5 when any item file was unreadable and skipped. Output is the
+  same as without the flag (the readable items on stdout, one warning per skipped id on
+  stderr); only the exit code changes, and only when something was skipped. It is how a
+  caller that reads stdout and the exit code alone tells a complete list from a partial one:
+  `ask list --status=open --urgency=blocker --json` prints `[]` and exits 0 both when there
+  are no blockers and when the one blocker sits in a skipped file. The default is unchanged.
 - `ask subscribe <id> --on <event>[,<event>] --handler <name> [--arg key=value ...]` and
   `ask unsubscribe <id> <subscription-id>` store and remove a subscription: "when this item
   is resolved, closed or reopened, run this handler". A handler is an executable at

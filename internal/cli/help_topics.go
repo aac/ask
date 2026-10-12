@@ -98,8 +98,10 @@ Orchestrator checkpoint convention
   ask has no event bus. Orchestrators that want to react to ask state
   must poll. The recommended cadence:
     - Before claiming new work in a long loop:
-        ask list --status=open --urgency=blocker
-      If non-empty, halt or address.
+        ask list --status=open --urgency=blocker --strict
+      If non-empty, halt or address. --strict makes the exit 5 when
+      an unreadable item file was skipped, so an empty list with exit
+      0 really means no blockers.
     - At session start:
         ask list --status=resolved
       Run any attached verifiers and close/reopen before doing other
