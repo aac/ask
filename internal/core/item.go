@@ -2,6 +2,7 @@ package core
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 )
@@ -72,6 +73,28 @@ type Link struct {
 // created before the field was introduced.
 const CurrentSchemaVersion = "1"
 
+// ErrUnsupportedSchemaVersion is returned (wrapped) when an item carries
+// an explicit, non-empty schema_version other than CurrentSchemaVersion.
+// Spec §1.1.1 makes that a hard error: the marker is the only guard a
+// newer ask has against this binary reading — and then rewriting — an
+// item whose shape it does not fully understand (unknown keys are
+// dropped on re-marshal). The CLI and MCP map it to exit 5 like any
+// other unreadable item file. Comparison is exact string equality, never
+// numeric or lexicographic.
+var ErrUnsupportedSchemaVersion = errors.New("unsupported schema_version")
+
+// checkSchemaVersion returns nil for CurrentSchemaVersion and a wrapped
+// ErrUnsupportedSchemaVersion for anything else. Callers handle the
+// empty-means-current default before calling.
+func checkSchemaVersion(v string) error {
+	if v == CurrentSchemaVersion {
+		return nil
+	}
+	return fmt.Errorf("%w %q: this ask reads and writes only schema_version %q "+
+		"(the item was probably written by a newer ask; upgrade ask, do not edit the file)",
+		ErrUnsupportedSchemaVersion, v, CurrentSchemaVersion)
+}
+
 // Item is the canonical agent-to-human request record. The on-disk
 // representation under .ask/items/<id>.json is the JSON marshalling of
 // this struct.
@@ -93,7 +116,8 @@ const CurrentSchemaVersion = "1"
 // (spec §1.1, §12). New items written via NewItem (and any item passed
 // through FileStore.Save) carry CurrentSchemaVersion. Read paths default
 // an empty value to CurrentSchemaVersion so items created before the
-// field existed continue to load. Agents reading `.ask/items/` directly
+// field existed continue to load, and reject any other explicit value
+// with ErrUnsupportedSchemaVersion (spec §1.1.1). Agents reading `.ask/items/` directly
 // MUST check this field; missing/empty means "version 1" for the
 // lifetime of the v1 schema.
 type Item struct {
@@ -134,8 +158,11 @@ func NewItem(id, title string, urgency Urgency, status Status, createdAt time.Ti
 	}
 }
 
-// UnmarshalJSON decodes b into i and validates the urgency and status
-// enums. Unknown enum values are rejected so malformed item files surface
+// UnmarshalJSON decodes b into i and validates schema_version and the
+// urgency and status enums. An explicit schema_version other than
+// CurrentSchemaVersion is rejected first (spec §1.1.1) — before any other
+// field is interpreted, since a future schema may retype them — and
+// unknown enum values are rejected so malformed item files surface
 // loudly instead of silently round-tripping. Per spec §1.1 the Links and
 // Blocks slices must never be nil — normalize a missing or null entry to
 // `[]` so callers can range over them unconditionally.
@@ -143,6 +170,28 @@ func (i *Item) UnmarshalJSON(b []byte) error {
 	type raw Item
 	var r raw
 	if err := json.Unmarshal(b, &r); err != nil {
+		// The typed decode can fail on an item from a future schema for
+		// no better reason than a field having changed type. Probe the
+		// marker alone so the caller is told the real cause.
+		var probe struct {
+			SchemaVersion string `json:"schema_version"`
+		}
+		if json.Unmarshal(b, &probe) == nil && probe.SchemaVersion != "" {
+			if verr := checkSchemaVersion(probe.SchemaVersion); verr != nil {
+				return verr
+			}
+		}
+		return err
+	}
+	// Backward-compat: items written before schema_version existed lack
+	// the field; treat absent/empty as CurrentSchemaVersion silently so
+	// existing on-disk stores continue to load (spec §1.1.1, §12;
+	// distribution-readiness §6). Any other explicit value is a hard
+	// error.
+	if r.SchemaVersion == "" {
+		r.SchemaVersion = CurrentSchemaVersion
+	}
+	if err := checkSchemaVersion(r.SchemaVersion); err != nil {
 		return err
 	}
 	if !r.Urgency.Valid() {
@@ -156,13 +205,6 @@ func (i *Item) UnmarshalJSON(b []byte) error {
 	}
 	if r.Blocks == nil {
 		r.Blocks = []string{}
-	}
-	// Backward-compat: items written before schema_version existed lack
-	// the field; treat absent/empty as CurrentSchemaVersion silently so
-	// existing on-disk stores continue to load (spec §1.1, §12;
-	// distribution-readiness §6).
-	if r.SchemaVersion == "" {
-		r.SchemaVersion = CurrentSchemaVersion
 	}
 	*i = Item(r)
 	return nil

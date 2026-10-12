@@ -294,26 +294,10 @@ func TestItemUnmarshalEmptySchemaVersionDefaultsToOne(t *testing.T) {
 	}
 }
 
-// TestItemUnmarshalPreservesExplicitSchemaVersion verifies a non-empty
-// value is preserved verbatim — when "2" eventually exists, the read
-// path must not silently rewrite it to "1".
-func TestItemUnmarshalPreservesExplicitSchemaVersion(t *testing.T) {
-	raw := []byte(`{
-		"schema_version":"2",
-		"id":"ask-3c89","title":"x","body":"","urgency":"normal","status":"open",
-		"filed_by":null,"tracker_ref":null,"verifier":null,"links":[],"blocks":[],
-		"resolution_note":null,"verification_output":null,
-		"created_at":"2026-05-15T10:30:00Z",
-		"resolved_at":null,"verified_at":null,"closed_at":null
-	}`)
-	var it Item
-	if err := json.Unmarshal(raw, &it); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-	if it.SchemaVersion != "2" {
-		t.Fatalf("explicit schema_version should be preserved, got %q", it.SchemaVersion)
-	}
-}
+// (The former TestItemUnmarshalPreservesExplicitSchemaVersion pinned that
+// an explicit "2" loads; spec §1.1.1 makes that a hard error. Its
+// replacement is TestSchemaverUnmarshalRejectsNonCurrent in
+// schemaver_test.go.)
 
 // TestItemRecipientRoundTrip pins that an explicit recipient survives
 // marshal/unmarshal and that the field defaults to nil (serialized as

@@ -179,6 +179,13 @@ func (s *FileStore) Save(item *Item) error {
 	if item.SchemaVersion == "" {
 		item.SchemaVersion = CurrentSchemaVersion
 	}
+	// Never write an item under a schema marker this binary does not
+	// implement (spec §1.1.1). Load already refuses such items, so this
+	// only fires for a struct-literal caller; it keeps "no write path can
+	// produce or overwrite a non-v1 item" true by construction.
+	if err := checkSchemaVersion(item.SchemaVersion); err != nil {
+		return fmt.Errorf("save item %s: %w", item.ID, err)
+	}
 	b, err := json.MarshalIndent(item, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal item %s: %w", item.ID, err)
@@ -195,7 +202,9 @@ func (s *FileStore) Save(item *Item) error {
 
 // Load reads a single item by its full id. Returns ErrIDNotFound if the
 // underlying file is missing (CLI maps to exit 3 per spec §4.3). A corrupt
-// item file returns a wrapped JSON error (CLI maps to exit 5 per spec §7).
+// item file returns a wrapped JSON error, and an item whose schema_version
+// is not CurrentSchemaVersion returns a wrapped ErrUnsupportedSchemaVersion
+// (CLI maps both to exit 5 per spec §1.1.1, §7).
 func (s *FileStore) Load(id string) (*Item, error) {
 	b, err := os.ReadFile(s.itemPath(id))
 	if errors.Is(err, os.ErrNotExist) {
@@ -206,6 +215,11 @@ func (s *FileStore) Load(id string) (*Item, error) {
 	}
 	var it Item
 	if err := json.Unmarshal(b, &it); err != nil {
+		// A well-formed item from a different schema is not "corrupt";
+		// say which it is so the reader repairs the right thing.
+		if errors.Is(err, ErrUnsupportedSchemaVersion) {
+			return nil, fmt.Errorf("item %s: %w", id, err)
+		}
 		return nil, fmt.Errorf("item %s corrupt: %w", id, err)
 	}
 	return &it, nil
