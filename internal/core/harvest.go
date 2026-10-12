@@ -54,6 +54,8 @@ type HarvestResult struct {
 // Behavior:
 //   - Pre-flight: if any source id already exists in target, returns
 //     ErrIDCollision wrapping the colliding ids. Neither store is touched.
+//     When the validation pass below also fails, the one error carries
+//     both (it is ErrIDCollision and ErrUnreadableSource).
 //   - Validation pass: every source item is Load'd via the canonical
 //     schema before anything is written. If any is unreadable, returns
 //     ErrUnreadableSource naming every unreadable id; neither store is
@@ -106,9 +108,9 @@ func Harvest(target, source *FileStore, clean bool) (*HarvestResult, error) {
 			collisions = append(collisions, id)
 		}
 	}
-	if len(collisions) > 0 {
-		return nil, fmt.Errorf("%w: %v", ErrIDCollision, collisions)
-	}
+	// A collision does not return yet: the validation pass below still
+	// runs, so one refused harvest names every problem in the source
+	// instead of the collision alone (act-16ad85).
 
 	// Validate before writing: read every source item first, so one
 	// unreadable item fails the whole harvest with the target untouched
@@ -131,7 +133,13 @@ func Harvest(target, source *FileStore, clean bool) (*HarvestResult, error) {
 		items = append(items, it)
 		subs = append(subs, f)
 	}
-	if len(unreadable) > 0 {
+	switch {
+	case len(collisions) > 0 && len(unreadable) > 0:
+		return nil, fmt.Errorf("%w: %v; %w (%d), nothing copied: %w",
+			ErrIDCollision, collisions, ErrUnreadableSource, len(unreadable), unreadable)
+	case len(collisions) > 0:
+		return nil, fmt.Errorf("%w: %v", ErrIDCollision, collisions)
+	case len(unreadable) > 0:
 		return nil, fmt.Errorf("%w (%d), nothing copied: %w",
 			ErrUnreadableSource, len(unreadable), unreadable)
 	}

@@ -100,7 +100,9 @@ Rules:
   source item before writing any, so if one or more are unreadable
   (non-v1 or corrupt) it exits 5 naming each such id, having copied
   nothing into the target and — `--clean` or not — removed nothing from
-  the source. It never skips an unreadable item.
+  the source. It never skips an unreadable item. When the same run also
+  has an id collision with the target, the one message names both the
+  colliding ids and every unreadable id.
 - **Write path refusal:** `core.FileStore.Save` refuses to write an Item
   whose `schema_version` is anything other than `"1"`, so no code path
   can produce or overwrite a non-v1 item file.
@@ -319,6 +321,7 @@ Implements act's prefix-resolution policy:
 - 1 match → operate on that id.
 - >1 matches → exit 4; stderr lists the ambiguous ids (newline-separated).
 - A full 4-char id with no match still exits 3 (not 4); a full 4-char id that exists matches itself.
+- Only files named for a valid id (§1.1, `ask-<4 lowercase hex>.json`) are candidates. A stray file in `items/` whose name is not one (`ASK-AAAB.json`) never makes a prefix ambiguous and never stands in for the item whose name it resembles. If a prefix matches no item but would match such a file, the verb exits 5 (not 3) and stderr names the file.
 
 ---
 

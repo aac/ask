@@ -72,6 +72,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   collision check and silently overwrote the target's `ask-aaaa.json`. Harvest now refuses the
   whole run (exit 5, nothing copied, every bad id named), and `ask list` skips a stray
   non-conforming file in `items/` with the usual per-id warning.
+- A stray file in `items/` whose name is not a valid id (`ASK-AAAB.json`) no longer gets in
+  the way of real items. It used to count as a prefix match, so `ask show aaa` beside
+  `ask-aaaa.json` exited 4 (ambiguous), as did `ask show aaaa` beside an `ASK-AAAA.json` on a
+  case-sensitive filesystem. Every verb now resolves to the real item; a prefix that matches
+  only the stray exits 5 with a message naming the file. `ask harvest` now names an id
+  collision and unreadable source items in one refusal instead of the collision alone.
 - Two writers of one item can no longer overwrite each other. `resolve`, `reopen`, `close`
   and `update` (and the MCP `ask_resolve` / `ask_reopen` / `ask_close` / `ask_update` tools) loaded an
   item,

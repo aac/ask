@@ -69,22 +69,38 @@ func NewID(projectID string, createdAt time.Time, title string, exists func(stri
 //   - 1 match → returned as-is.
 //   - >1 matches → ErrIDAmbiguous wrapped with the list of matches (CLI exit 4).
 //
-// The pool is the set of full ids known to the store; this function does
-// not touch disk.
+// The pool is the set of full ids known to the store (FileStore.ListIDs:
+// one per file in .ask/items/); this function does not touch disk.
+//
+// A pool entry that is not a valid id (checkID) is a stray file, e.g. a
+// hand-placed ASK-AAAB.json. It is never a candidate: it cannot make a
+// prefix ambiguous or stand in for the real item whose name it resembles.
+// Only when no real id matches and a stray would have does the lookup
+// fail with ErrInvalidID naming the file(s) (CLI exit 5), rather than
+// claim nothing is there (act-16ad85).
 func ResolvePrefix(input string, pool []string) (string, error) {
 	needle := strings.TrimPrefix(strings.ToLower(input), idPrefix)
 	if needle == "" {
 		return "", ErrIDNotFound
 	}
-	var matches []string
+	var matches, strays []string
 	for _, id := range pool {
 		tail := strings.TrimPrefix(strings.ToLower(id), idPrefix)
-		if strings.HasPrefix(tail, needle) {
-			matches = append(matches, id)
+		if !strings.HasPrefix(tail, needle) {
+			continue
 		}
+		if checkID(id) != nil {
+			strays = append(strays, id+".json")
+			continue
+		}
+		matches = append(matches, id)
 	}
 	switch len(matches) {
 	case 0:
+		if len(strays) > 0 {
+			return "", fmt.Errorf("%w: no item matches %q, only stray file(s) in .ask/items/ not named for an id: %s",
+				ErrInvalidID, input, strings.Join(strays, ", "))
+		}
 		return "", ErrIDNotFound
 	case 1:
 		return matches[0], nil
