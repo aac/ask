@@ -77,6 +77,10 @@ Resolving already encodes "the human said done." Add `--note` only for context w
 
 ask is human-recipient by default; items without `--recipient` target the implicit human. When the consumer is another agent (a cron-driven loop, a sibling process, a service-account poll), set `--recipient <kind>:<identifier>` so it can scope its poll with `ask list --recipient <ref>`. Examples: `agent:data-prep`, `agent:reviewer-bot`, `human:alex`, `team:reviewers`. ask never interprets the tag — it's opaque; the kind prefix is convention only. Skip the flag for the common single-human case. ask is pull-based (no delivery or notification); `resolve`/`reopen`/`close` behave identically regardless of recipient.
 
+## Listing and polling: an empty list may be partial
+
+`ask list` skips an item file it cannot read, warns on stderr, and still exits 0 — so an empty list is not proof there are no items. When empty has to mean "really none" (a blocker poll before claiming work, a sweep that counts open asks), pass `--strict`: `ask list --status=open --urgency=blocker --strict`. Exit 5 then means the list is incomplete (stdout still carries the readable items); exit 0 means it is complete. Over MCP, `ask_list` takes no `strict` argument: a partial result carries `_meta["ask/skipped"]` (an array of `{id, reason}`), and a complete one has no `_meta` key.
+
 ## Idempotent no-ops exit 6
 
 `ask resolve` on an already-resolved item, `ask close` on an already-closed one, and `ask reopen` on an item not in `resolved` succeed as no-ops with exit code 6 (plus a stderr warning; the normal stdout payload is still emitted). Scripts under `set -e` should treat 6 as success (equivalent to 0).
