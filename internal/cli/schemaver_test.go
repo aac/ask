@@ -106,21 +106,33 @@ func TestSchemaverWriteVerbsLeaveFileByteIdentical(t *testing.T) {
 }
 
 // TestSchemaverListDoesNotPresentItAsNormal pins what `ask list` does over
-// a store holding one such item: it fails loudly (exit 5, naming the id
-// and schema_version) rather than printing the item as an ordinary v1 row.
-// This is the same treatment any unreadable item file gets today.
+// a store holding one such item next to an ordinary one: it never prints
+// the item as an ordinary v1 row, and says so on stderr naming the id and
+// schema_version. Since act-d1ad86 that is a skip-and-warn (spec §7.2) —
+// the ordinary sibling is still listed and the exit is 0 — where it used
+// to abort the whole listing with exit 5. The file is left byte-identical.
 func TestSchemaverListDoesNotPresentItAsNormal(t *testing.T) {
-	_, _, _ = schemaverSeed(t)
+	_, path, want := schemaverSeed(t)
 	for _, args := range [][]string{{"list"}, {"list", "--json"}, {"list", "--all"}} {
 		code, out, errOut := schemaverRun(t, args...)
-		if code != 5 {
-			t.Fatalf("%v: exit %d, want 5", args, code)
+		if code != 0 {
+			t.Fatalf("%v: exit %d, want 0 (stderr %q)", args, code, errOut)
 		}
 		if !strings.Contains(errOut, "schema_version") || !strings.Contains(errOut, "ask-bbbb") {
 			t.Fatalf("%v: stderr must name the id and schema_version, got %q", args, errOut)
 		}
 		if strings.Contains(out, "ask-bbbb") {
 			t.Fatalf("%v: listed the unsupported item as a normal row: %q", args, out)
+		}
+		if !strings.Contains(out, "ask-aaaa") {
+			t.Fatalf("%v: the v1 sibling must still be listed, got %q", args, out)
+		}
+		got, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(got, want) {
+			t.Fatalf("%v rewrote the item:\n%s", args, got)
 		}
 	}
 }

@@ -252,7 +252,23 @@ func (s *FileStore) ListIDs() ([]string, error) {
 	return ids, nil
 }
 
-// List returns every item in the store, sorted per spec §3.2:
+// SkippedItem names one item file List could not read, and why. Err is the
+// error Load returned for that id: a JSON decode failure, a wrapped
+// ErrUnsupportedSchemaVersion, or an I/O error on the file itself.
+type SkippedItem struct {
+	ID  string
+	Err error
+}
+
+// String is the one wording for a skip, shared by the CLI's stderr warning
+// and the MCP warning part (each prefixes `ask list: `). The id is stated
+// explicitly rather than left to Err's own text, so the reader can always
+// find it in the same place.
+func (s SkippedItem) String() string {
+	return fmt.Sprintf("skipped %s: %v", s.ID, s.Err)
+}
+
+// List returns every readable item in the store, sorted per spec §3.2:
 //
 //  1. urgency descending — blocker (0) before normal (1) before fyi (2).
 //  2. created_at ascending (oldest first within a given urgency).
@@ -260,20 +276,38 @@ func (s *FileStore) ListIDs() ([]string, error) {
 //
 // This is the order both plain-text `ask list` and `ask list --json` use.
 // Filtering by status (default: hide closed) is the caller's responsibility;
-// List returns every item on disk.
-func (s *FileStore) List() ([]*Item, error) {
+// List returns every readable item on disk.
+//
+// An item file that cannot be read — corrupt JSON, or a schema_version
+// this binary does not implement (spec §1.1.1) — does not fail the call.
+// It is left out of the items and reported in skipped (sorted by id), so
+// one bad file cannot lock the whole inbox (spec §7.2). List does not
+// decide whether that is fatal: the caller applies the §7.2 rule (an
+// error only when something was skipped and nothing was readable) and
+// owes its reader a warning per skipped id. The returned error is
+// reserved for failing to enumerate the store at all.
+//
+// A file that disappears between the directory read and its Load is not
+// unreadable — it is gone, as if removed a moment earlier — and is
+// dropped without a skip entry.
+func (s *FileStore) List() (items []*Item, skipped []SkippedItem, err error) {
 	ids, err := s.ListIDs()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	out := make([]*Item, 0, len(ids))
 	for _, id := range ids {
 		it, err := s.Load(id)
+		if errors.Is(err, ErrIDNotFound) {
+			continue
+		}
 		if err != nil {
-			return nil, err
+			skipped = append(skipped, SkippedItem{ID: id, Err: err})
+			continue
 		}
 		out = append(out, it)
 	}
+	sort.Slice(skipped, func(i, j int) bool { return skipped[i].ID < skipped[j].ID })
 	sort.SliceStable(out, func(i, j int) bool {
 		ui, uj := urgencyRank(out[i].Urgency), urgencyRank(out[j].Urgency)
 		if ui != uj {
@@ -284,7 +318,7 @@ func (s *FileStore) List() ([]*Item, error) {
 		}
 		return out[i].ID < out[j].ID
 	})
-	return out, nil
+	return out, skipped, nil
 }
 
 // urgencyRank assigns the spec §3.2 ordering value to an urgency. Unknown

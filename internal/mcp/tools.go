@@ -16,6 +16,9 @@
 //     (stderr warning + stdout success body); see spec §5.5. ask_update
 //     uses the same envelope when the item already reads as requested;
 //     its warning is `ask update: <id> already reads as requested`.
+//   - ask_list over a store with unreadable item files → isError=false
+//     with the array of readable items plus one warning part per skipped
+//     id; code 5 only when no item at all was readable (spec §7.2).
 package mcp
 
 import (
@@ -94,7 +97,7 @@ func tools() []toolDescriptor {
 		},
 		{
 			Name:        "ask_list",
-			Description: "List asks. Defaults to status != closed; pass `all: true` for every state (spec §3, §5.3).",
+			Description: "List asks. Defaults to status != closed; pass `all: true` for every state (spec §3, §5.3). An item file that cannot be read is skipped: the array of readable items is content[0], and each skipped id adds a text part `ask list: skipped <id>: <reason>`.",
 			InputSchema: map[string]any{
 				"type":                 "object",
 				"additionalProperties": false,
@@ -336,23 +339,48 @@ type listArgs struct {
 	All       bool     `json:"all"`
 }
 
-func callList(repoRoot string, raw json.RawMessage) (string, bool) {
+// callList is the MCP twin of `ask list`. Unreadable item files follow
+// spec §7.2 the way the CLI does: they are skipped and the rest are
+// returned with isError=false, the array in content[0] and then one extra
+// text part per skipped id carrying the line the CLI writes to stderr
+// (`ask list: skipped <id>: <reason>`) — the §5.5 success-plus-warning
+// shape. When files were skipped and no item at all was readable, the
+// call is a code-5 error whose message names every skipped id.
+func callList(repoRoot string, raw json.RawMessage) ([]toolContent, bool) {
+	body, skipped, isErr := listBody(repoRoot, raw)
+	parts := textContent(body)
+	if isErr {
+		return parts, true
+	}
+	for _, sk := range skipped {
+		parts = append(parts, toolContent{Type: "text", Text: "ask list: " + sk.String()})
+	}
+	return parts, false
+}
+
+// listBody returns the JSON body for ask_list (the item array, or an
+// error envelope with isErr=true) and, on success, the item files that
+// were skipped as unreadable.
+func listBody(repoRoot string, raw json.RawMessage) (body string, skipped []core.SkippedItem, isErr bool) {
+	fail := func(code int, msg string) (string, []core.SkippedItem, bool) {
+		return encodeErr(code, msg), nil, true
+	}
 	var args listArgs
 	if err := json.Unmarshal(raw, &args); err != nil {
-		return encodeErr(2, "ask list: "+err.Error()), true
+		return fail(2, "ask list: "+err.Error())
 	}
 	// Spec §5.3: `all: true` + a status value is a validation error.
 	if args.All && len(args.Status) > 0 {
-		return encodeErr(2, "ask list: --all and --status are mutually exclusive"), true
+		return fail(2, "ask list: --all and --status are mutually exclusive")
 	}
 	for _, s := range args.Status {
 		if !core.Status(s).Valid() {
-			return encodeErr(2, fmt.Sprintf("ask list: invalid status %q (want one of open, resolved, closed)", s)), true
+			return fail(2, fmt.Sprintf("ask list: invalid status %q (want one of open, resolved, closed)", s))
 		}
 	}
 	for _, u := range args.Urgency {
 		if !core.Urgency(u).Valid() {
-			return encodeErr(2, fmt.Sprintf("ask list: invalid urgency %q (want one of blocker, normal, fyi)", u)), true
+			return fail(2, fmt.Sprintf("ask list: invalid urgency %q (want one of blocker, normal, fyi)", u))
 		}
 	}
 	// MCP `blocks` filter is a single string (mirrors the CLI's
@@ -360,10 +388,10 @@ func callList(repoRoot string, raw json.RawMessage) (string, bool) {
 	// from an orchestrator that knows the act id it's coordinating).
 	if args.Blocks != "" {
 		if strings.TrimSpace(args.Blocks) == "" {
-			return encodeErr(2, "ask list: blocks: ref must not be empty or whitespace-only"), true
+			return fail(2, "ask list: blocks: ref must not be empty or whitespace-only")
 		}
 		if len(args.Blocks) > maxBlocksRefLen {
-			return encodeErr(2, fmt.Sprintf("ask list: blocks: ref exceeds %d characters", maxBlocksRefLen)), true
+			return fail(2, fmt.Sprintf("ask list: blocks: ref exceeds %d characters", maxBlocksRefLen))
 		}
 	}
 	// MCP `recipient` filter is a single string (same convention as
@@ -371,19 +399,30 @@ func callList(repoRoot string, raw json.RawMessage) (string, bool) {
 	// within the per-ref cap.
 	if args.Recipient != "" {
 		if strings.TrimSpace(args.Recipient) == "" {
-			return encodeErr(2, "ask list: recipient: ref must not be empty or whitespace-only"), true
+			return fail(2, "ask list: recipient: ref must not be empty or whitespace-only")
 		}
 		if len(args.Recipient) > maxRecipientRefLen {
-			return encodeErr(2, fmt.Sprintf("ask list: recipient: ref exceeds %d characters", maxRecipientRefLen)), true
+			return fail(2, fmt.Sprintf("ask list: recipient: ref exceeds %d characters", maxRecipientRefLen))
 		}
 	}
 	store, err := core.OpenStore(repoRoot, nil)
 	if err != nil {
-		return encodeErr(storeErrCode(err), "ask list: "+err.Error()), true
+		return fail(storeErrCode(err), "ask list: "+err.Error())
 	}
-	items, err := store.List()
+	items, skipped, err := store.List()
 	if err != nil {
-		return encodeErr(5, "ask list: "+err.Error()), true
+		return fail(5, "ask list: "+err.Error())
+	}
+	if len(skipped) > 0 && len(items) == 0 {
+		// Spec §7.2: every item file was unreadable. Judged before the
+		// filters run, as in the CLI. There is no stderr here, so the
+		// one message carries every skipped id.
+		reasons := make([]string, len(skipped))
+		for i, sk := range skipped {
+			reasons[i] = sk.String()
+		}
+		return fail(5, fmt.Sprintf("ask list: no readable items (%d unreadable): %s",
+			len(skipped), strings.Join(reasons, "; ")))
 	}
 	filtered := make([]*core.Item, 0, len(items))
 	for _, it := range items {
@@ -405,7 +444,11 @@ func callList(repoRoot string, raw json.RawMessage) (string, bool) {
 	if filtered == nil {
 		filtered = []*core.Item{}
 	}
-	return encodeJSON(filtered)
+	body, isErr = encodeJSON(filtered)
+	if isErr {
+		return body, nil, true
+	}
+	return body, skipped, false
 }
 
 // statusMatches and urgencyMatches mirror the CLI helpers in

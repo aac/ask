@@ -107,7 +107,8 @@ func TestSchemaverUnmarshalRetypedFieldStillNamesVersion(t *testing.T) {
 
 // TestSchemaverStoreLoadAndListRefuse checks the store boundary: Load on a
 // real file returns the version error naming the id (and does not call the
-// file "corrupt"), and List does not present the item as a normal one.
+// file "corrupt"), and List does not present the item as a normal one —
+// it reports it as skipped, carrying the same version error (spec §7.2).
 func TestSchemaverStoreLoadAndListRefuse(t *testing.T) {
 	s := tempStore(t)
 	if err := s.Save(NewItem("ask-0001", "ok", UrgencyNormal, StatusOpen, time.Now().UTC())); err != nil {
@@ -125,9 +126,15 @@ func TestSchemaverStoreLoadAndListRefuse(t *testing.T) {
 	if _, err := s.Load("ask-0001"); err != nil {
 		t.Fatalf("sibling v1 item must still load: %v", err)
 	}
-	items, err := s.List()
-	if !errors.Is(err, ErrUnsupportedSchemaVersion) {
-		t.Fatalf("List: want ErrUnsupportedSchemaVersion, got items=%d err=%v", len(items), err)
+	items, skipped, err := s.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(items) != 1 || items[0].ID != "ask-0001" {
+		t.Fatalf("List: want only ask-0001, got %d items", len(items))
+	}
+	if len(skipped) != 1 || skipped[0].ID != "ask-0002" || !errors.Is(skipped[0].Err, ErrUnsupportedSchemaVersion) {
+		t.Fatalf("List: want ask-0002 skipped with ErrUnsupportedSchemaVersion, got %+v", skipped)
 	}
 }
 

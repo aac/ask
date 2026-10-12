@@ -29,7 +29,17 @@ func (s *stringSliceFlag) Set(v string) error { *s = append(*s, v); return nil }
 // Exit codes (spec §2):
 //   - 0 on success (including empty result set)
 //   - 2 on validation error (bad flag, bad enum value, --status + --all)
-//   - 5 on I/O error (cannot open store, cannot read items dir)
+//   - 5 on I/O error (cannot open store, cannot read items dir, or the
+//     store holds item files and none of them is readable)
+//
+// Unreadable item files (spec §7.2): a corrupt file or one whose
+// schema_version is not "1" is skipped with one stderr warning per id and
+// the rest are listed, exit 0. Warnings go to stderr only, so stdout stays
+// exactly the list (valid JSON under --json). Readability is judged
+// before the filters run — an unreadable file cannot be filtered, since
+// its status and urgency are unknown — so the exit is 5 only when files
+// were skipped and no item at all was readable; a store with a readable
+// item that the filters exclude lists nothing and exits 0.
 func runList(args []string) int {
 	fs := flag.NewFlagSet("list", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
@@ -92,9 +102,18 @@ func runList(args []string) int {
 	if code != 0 {
 		return code
 	}
-	items, err := store.List()
+	items, skipped, err := store.List()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "ask list: %v\n", err)
+		return 5
+	}
+	for _, sk := range skipped {
+		fmt.Fprintf(os.Stderr, "ask list: %s\n", sk)
+	}
+	if len(skipped) > 0 && len(items) == 0 {
+		// Spec §7.2: every item file was unreadable. Nothing on stdout —
+		// an empty list here would read as an empty inbox.
+		fmt.Fprintf(os.Stderr, "ask list: no readable items (%d unreadable)\n", len(skipped))
 		return 5
 	}
 

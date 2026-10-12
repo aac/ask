@@ -283,7 +283,9 @@ func (s *Server) handleToolsCall(ctx context.Context, enc *json.Encoder, req jso
 // the unchanged Item JSON followed by a human-readable warning string
 // (`ask <verb>: already <status>`). Per spec §5.5 these arrive with
 // isError=false because the call succeeded — the warning is an
-// MCP-idiomatic affordance, not an error.
+// MCP-idiomatic affordance, not an error. ask_list uses the same shape
+// for item files it had to skip: the array, then one warning part per
+// skipped id (spec §7.2).
 //
 // Unknown tool names return a spec §5.5-style error envelope with
 // code=2 (validation) so the client's framing remains consistent with
@@ -294,8 +296,7 @@ func (s *Server) invoke(name string, args json.RawMessage) ([]toolContent, bool)
 		body, isErr := callNew(s.repoRoot, args)
 		return textContent(body), isErr
 	case "ask_list":
-		body, isErr := callList(s.repoRoot, args)
-		return textContent(body), isErr
+		return callList(s.repoRoot, args)
 	case "ask_show":
 		body, isErr := callShow(s.repoRoot, args)
 		return textContent(body), isErr

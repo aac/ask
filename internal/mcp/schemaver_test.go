@@ -45,9 +45,11 @@ func schemaverSeedMCP(t *testing.T, root string) (path string, want []byte) {
 }
 
 // TestSchemaverMCPToolsRefuse drives the real MCP tools over a store
-// holding a schema_version "2" item (spec §1.1.1): ask_show, ask_list and
-// every mutating tool return an isError envelope with code 5 naming
+// holding a schema_version "2" item (spec §1.1.1): ask_show and every
+// mutating tool return an isError envelope with code 5 naming
 // schema_version, and the item file is byte-identical afterwards.
+// (ask_list no longer belongs here: it skips the item and warns, spec
+// §7.2 — see listskip_test.go.)
 func TestSchemaverMCPToolsRefuse(t *testing.T) {
 	root := t.TempDir()
 	path, want := schemaverSeedMCP(t, root)
@@ -57,7 +59,6 @@ func TestSchemaverMCPToolsRefuse(t *testing.T) {
 		args map[string]any
 	}{
 		{"ask_show", map[string]any{"id": "ask-bbbb"}},
-		{"ask_list", map[string]any{}},
 		{"ask_resolve", map[string]any{"id": "ask-bbbb"}},
 		{"ask_close", map[string]any{"id": "ask-bbbb"}},
 		{"ask_reopen", map[string]any{"id": "ask-bbbb"}},
