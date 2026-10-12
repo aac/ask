@@ -40,6 +40,11 @@ func (s *stringSliceFlag) Set(v string) error { *s = append(*s, v); return nil }
 // its status and urgency are unknown — so the exit is 5 only when files
 // were skipped and no item at all was readable; a store with a readable
 // item that the filters exclude lists nothing and exits 0.
+//
+// --strict (spec §7.2) is the opt-in machine signal for a partial list:
+// stdout and the per-id warnings are unchanged, but any skipped file turns
+// the exit into 5, so a consumer that reads only stdout and the exit code
+// can tell "[]" from "[] plus something unreadable".
 func runList(args []string) int {
 	fs := flag.NewFlagSet("list", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
@@ -54,6 +59,7 @@ func runList(args []string) int {
 	fs.Var(&recipients, "recipient", "filter to items whose recipient equals this ref; repeatable (OR)")
 	all := fs.Bool("all", false, "list items in every state (equivalent to no status filter)")
 	asJSON := fs.Bool("json", false, "emit JSON array (spec §1.4)")
+	strict := fs.Bool("strict", false, "exit 5 if any item file was unreadable and skipped; output is unchanged (spec §7.2)")
 	if err := fs.Parse(args); err != nil {
 		return handleParseErr(err, fs, "list",
 			"ask list [flags]",
@@ -145,7 +151,7 @@ func runList(args []string) int {
 			fmt.Fprintf(os.Stderr, "ask list: %v\n", err)
 			return 5
 		}
-		return 0
+		return strictlistExit(*strict, len(skipped))
 	}
 
 	// Spec §3.3: tab-separated columns, no header row.
@@ -165,7 +171,18 @@ func runList(args []string) int {
 			it.Title,
 		)
 	}
-	return 0
+	return strictlistExit(*strict, len(skipped))
+}
+
+// strictlistExit is the exit code of a list that has been printed. Spec
+// §7.2: 0, unless --strict was given and files were skipped — then 5, with
+// one stderr line saying why (after the list and the per-id warnings).
+func strictlistExit(strict bool, skipped int) int {
+	if !strict || skipped == 0 {
+		return 0
+	}
+	fmt.Fprintf(os.Stderr, "ask list: --strict: %d unreadable item file(s) skipped; the list is incomplete\n", skipped)
+	return 5
 }
 
 // statusMatches applies the spec §3.1/§3.4 status filter. Precedence:
