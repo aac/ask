@@ -299,6 +299,8 @@ func (s *Server) invoke(name string, args json.RawMessage) ([]toolContent, bool)
 	case "ask_show":
 		body, isErr := callShow(s.repoRoot, args)
 		return textContent(body), isErr
+	case "ask_update":
+		return callUpdate(s.repoRoot, args)
 	case "ask_resolve":
 		return callResolve(s.repoRoot, args)
 	case "ask_reopen":

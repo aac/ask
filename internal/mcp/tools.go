@@ -13,7 +13,9 @@
 //     open) → isError=false with two content parts: the unchanged Item
 //     payload, followed by a `ask <verb>: already <status>` warning
 //     string. This is the MCP analog of the CLI's exit-6 envelope
-//     (stderr warning + stdout success body); see spec §5.5.
+//     (stderr warning + stdout success body); see spec §5.5. ask_update
+//     uses the same envelope when the item already reads as requested;
+//     its warning is `ask update: <id> already reads as requested`.
 package mcp
 
 import (
@@ -128,6 +130,21 @@ func tools() []toolDescriptor {
 				"additionalProperties": false,
 				"properties": map[string]any{
 					"id": map[string]any{"type": "string", "minLength": 1},
+				},
+			},
+		},
+		{
+			Name:        "ask_update",
+			Description: "Correct an ask's title or body in place. Makes no state transition: an open ask stays open. Give `title`, and/or one of `body` (replace; an empty string clears it) or `body_append` (add a note after a blank line). Returns the updated Item object (spec §1.8.1).",
+			InputSchema: map[string]any{
+				"type":                 "object",
+				"required":             []string{"id"},
+				"additionalProperties": false,
+				"properties": map[string]any{
+					"id":          map[string]any{"type": "string", "minLength": 1},
+					"title":       map[string]any{"type": "string", "minLength": 1, "maxLength": 200},
+					"body":        map[string]any{"type": "string", "maxLength": 16384},
+					"body_append": map[string]any{"type": "string", "maxLength": 16384},
 				},
 			},
 		},
@@ -561,6 +578,77 @@ func mutate(repoRoot, verb string, raw json.RawMessage, fn func(idArgs, *core.It
 		return []toolContent{
 			{Type: "text", Text: body},
 			{Type: "text", Text: fmt.Sprintf("ask %s: already %s", verb, it.Status)},
+		}, false
+	}
+	return textContent(body), false
+}
+
+// ----- ask_update ------------------------------------------------------------
+
+// updateArgs mirrors the ask_update inputSchema. The text fields are
+// pointers so "absent" and "explicit empty string" stay distinct: an
+// omitted body must not blank the body, while `"body": ""` clears it —
+// the same distinction `ask update` draws with flag.Visit. The CLI's
+// --body-file / --body-append-file have no twin: an MCP caller already
+// holds the text.
+type updateArgs struct {
+	ID         string  `json:"id"`
+	Title      *string `json:"title"`
+	Body       *string `json:"body"`
+	BodyAppend *string `json:"body_append"`
+}
+
+// callUpdate is the MCP twin of `ask update` (spec §1.8.1): same
+// validation order, same messages, and the edit itself is the shared
+// core.TextUpdate. It makes no state transition. On the idempotent no-op
+// (the item already reads as requested) it skips the write and returns
+// the §5.5 two-part envelope — the unchanged Item plus the warning line
+// the CLI writes to stderr with exit 6.
+func callUpdate(repoRoot string, raw json.RawMessage) ([]toolContent, bool) {
+	var args updateArgs
+	if err := json.Unmarshal(raw, &args); err != nil {
+		return textContent(encodeErr(2, "ask update: "+err.Error())), true
+	}
+	if args.Body != nil && args.BodyAppend != nil {
+		return textContent(encodeErr(2, "ask update: body, body_append are mutually exclusive")), true
+	}
+	upd := core.TextUpdate{Title: args.Title, Body: args.Body, BodyAppend: args.BodyAppend}
+	if upd.Empty() {
+		return textContent(encodeErr(2, "ask update: nothing to update (want title, body, or body_append)")), true
+	}
+	if args.Title != nil {
+		if msg, ok := core.ValidateTitle(*args.Title); !ok {
+			return textContent(encodeErr(2, "ask update: "+msg)), true
+		}
+	}
+	if strings.TrimSpace(args.ID) == "" {
+		return textContent(encodeErr(2, "ask update: id required")), true
+	}
+	store, full, code, msg, ok := resolveID(repoRoot, "update", args.ID)
+	if !ok {
+		return textContent(encodeErr(code, msg)), true
+	}
+	it, err := store.Load(full)
+	if err != nil {
+		if errors.Is(err, core.ErrIDNotFound) {
+			return textContent(encodeErr(3, fmt.Sprintf("ask update: id %q not found", full))), true
+		}
+		return textContent(encodeErr(5, "ask update: "+err.Error())), true
+	}
+	changed := upd.Apply(it)
+	if changed {
+		if err := store.Save(it); err != nil {
+			return textContent(encodeErr(5, "ask update: "+err.Error())), true
+		}
+	}
+	body, isErr := encodeJSON(it)
+	if isErr {
+		return textContent(body), true
+	}
+	if !changed {
+		return []toolContent{
+			{Type: "text", Text: body},
+			{Type: "text", Text: fmt.Sprintf("ask update: %s already reads as requested", it.ID)},
 		}, false
 	}
 	return textContent(body), false
