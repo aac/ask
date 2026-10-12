@@ -64,6 +64,12 @@ const (
 	maxLinkURLLen         = 2048
 )
 
+// The other advertised constraints — maxItems, minLength, minimum /
+// maximum, enum, required, additionalProperties:false — are enforced by
+// schemaViolation (schemacheck.go), which reads them off the schemas
+// themselves; each handler calls it after its own checks and before it
+// touches the store.
+
 // tooLong reports whether s exceeds max characters and, if so, the
 // message to return (code 2), naming the field and the limit. Length is
 // counted in Unicode code points, which is what JSON Schema's maxLength
@@ -339,6 +345,13 @@ func callNew(repoRoot string, raw json.RawMessage) (string, bool) {
 			return encodeErr(2, msg), true
 		}
 	}
+	// Everything else the schema advertises (schemacheck.go): links
+	// maxItems, link label/url required and non-empty,
+	// verifier.timeout_seconds 1..3600, unknown arguments. title is
+	// skipped: it was validated above on its trimmed value.
+	if msg, bad := schemaViolation("ask_new", raw, "title"); bad {
+		return encodeErr(2, msg), true
+	}
 
 	store, err := core.OpenStore(repoRoot, nil)
 	if err != nil {
@@ -468,6 +481,9 @@ func listBody(repoRoot string, raw json.RawMessage) (body string, skipped []core
 			return fail(2, fmt.Sprintf("ask list: recipient: ref exceeds %d characters", maxRecipientRefLen))
 		}
 	}
+	if msg, bad := schemaViolation("ask_list", raw); bad {
+		return fail(2, msg)
+	}
 	store, err := core.OpenStore(repoRoot, nil)
 	if err != nil {
 		return fail(storeErrCode(err), "ask list: "+err.Error())
@@ -594,6 +610,9 @@ func callShow(repoRoot string, raw json.RawMessage) (string, bool) {
 	if strings.TrimSpace(args.ID) == "" {
 		return encodeErr(2, "ask show: id required"), true
 	}
+	if msg, bad := schemaViolation("ask_show", raw); bad {
+		return encodeErr(2, msg), true
+	}
 	store, full, code, msg, ok := resolveID(repoRoot, "show", args.ID)
 	if !ok {
 		return encodeErr(code, msg), true
@@ -651,6 +670,13 @@ func mutate(repoRoot, verb string, raw json.RawMessage, fn func(idArgs, *core.It
 		return textContent(encodeErr(2, msg)), true
 	}
 	if msg, bad := tooLong(verb, "reason", args.Reason, maxTextLen); bad {
+		return textContent(encodeErr(2, msg)), true
+	}
+	// idArgs is shared by show/resolve/reopen/close and so decodes both
+	// note and reason for all of them; the schema check is what refuses
+	// the one a given tool does not declare. It runs before lockedChange
+	// opens or locks the store.
+	if msg, bad := schemaViolation("ask_"+verb, raw); bad {
 		return textContent(encodeErr(2, msg)), true
 	}
 	ch, errBody := lockedChange(repoRoot, verb, args.ID, func(it *core.Item, now time.Time) error {
@@ -753,6 +779,11 @@ func callUpdate(repoRoot string, raw json.RawMessage) ([]toolContent, bool) {
 	}
 	if strings.TrimSpace(args.ID) == "" {
 		return textContent(encodeErr(2, "ask update: id required")), true
+	}
+	// title is skipped: validated above on its trimmed value. Runs before
+	// lockedChange opens or locks the store.
+	if msg, bad := schemaViolation("ask_update", raw, "title"); bad {
+		return textContent(encodeErr(2, msg)), true
 	}
 	ch, errBody := lockedChange(repoRoot, "update", args.ID, func(it *core.Item, _ time.Time) error {
 		if args.BodyAppend != nil {
