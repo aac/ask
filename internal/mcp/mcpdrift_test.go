@@ -191,6 +191,39 @@ func TestNoopIsNeverCodeSix(t *testing.T) {
 	}
 }
 
+// TestAskNewTitleMessagesUnchanged pins ask_new's title refusals word for
+// word, so routing them through core.ValidateTitle changes nothing a
+// caller can see.
+func TestAskNewTitleMessagesUnchanged(t *testing.T) {
+	root := t.TempDir()
+	initRepo(t, root)
+	cases := []struct{ name, title, want string }{
+		{"empty", "", "ask new: title is required"},
+		{"whitespace", "  \t ", "ask new: title is required"},
+		{"too long", strings.Repeat("x", 201), "ask new: title must be 1..200 characters"},
+		{"newline", "a\nb", "ask new: title must not contain newlines"},
+		{"carriage return", "a\rb", "ask new: title must not contain newlines"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tr := mcpdriftCall(t, root, "ask_new", map[string]any{"title": tc.title})
+			if got := mcpdriftErrCode(t, tr); got != 2 {
+				t.Errorf("code %d want 2", got)
+			}
+			var env errEnvelope
+			_ = json.Unmarshal([]byte(tr.Content[0].Text), &env)
+			if env.Message != tc.want {
+				t.Errorf("message: got %q want %q", env.Message, tc.want)
+			}
+		})
+	}
+	// Surrounding whitespace is trimmed and 200 characters is accepted.
+	tr := mcpdriftCall(t, root, "ask_new", map[string]any{"title": " " + strings.Repeat("x", 200) + " "})
+	if tr.IsError {
+		t.Fatalf("a 200-character title was refused: %.200s", tr.Content[0].Text)
+	}
+}
+
 // mcpdriftSnapshot reads every item file in the store, keyed by file
 // name. Two equal snapshots mean no item was added, removed, or changed
 // by so much as a byte.

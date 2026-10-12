@@ -262,14 +262,15 @@ func callNew(repoRoot string, raw json.RawMessage) (string, bool) {
 		return encodeErr(2, "ask new: "+err.Error()), true
 	}
 	title := strings.TrimSpace(args.Title)
+	// A missing title keeps ask_new's own wording ("is required": the
+	// field is mandatory here, where on ask_update it is optional and
+	// core.ValidateTitle's "must not be empty" fits). The remaining rules
+	// — length, newlines — are the shared ones.
 	if title == "" {
 		return encodeErr(2, "ask new: title is required"), true
 	}
-	if len(title) > 200 {
-		return encodeErr(2, "ask new: title must be 1..200 characters"), true
-	}
-	if strings.ContainsAny(title, "\n\r") {
-		return encodeErr(2, "ask new: title must not contain newlines"), true
+	if msg, ok := core.ValidateTitle(title); !ok {
+		return encodeErr(2, "ask new: "+msg), true
 	}
 	urgency := args.Urgency
 	if urgency == "" {
