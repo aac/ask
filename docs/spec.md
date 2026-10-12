@@ -129,7 +129,7 @@ Rules:
 
 ### 1.4 `ask list --json`
 
-A JSON array of Item objects, in the order rendered by the human view (§3). Empty array if nothing matches. Never `null`. The list is sorted server-side; clients should not re-sort.
+A JSON array of Item objects, in the order rendered by the human view (§3). Empty array if nothing matches. Never `null`. Unreadable item files are left out of the array and warned about on stderr (§7.2). The list is sorted server-side; clients should not re-sort.
 
 ```json
 [
@@ -215,7 +215,7 @@ The full taxonomy. Every CLI invocation returns exactly one of these.
 | `2` | Validation error | bad flag, missing required arg, title >200 chars, urgency not in set, invalid transition (e.g. `resolve` on a `closed` item), unknown subcommand, unknown help topic, attempt to set `verifier.type` to a reserved-but-unimplemented value (`url`, `mcp`) |
 | `3` | Not found | id prefix matches zero items |
 | `4` | Ambiguous id prefix | id prefix matches >1 items |
-| `5` | I/O / disk error | cannot read/write `.ask/`, corrupt `config.json` (§7), an item file that is corrupt or carries a `schema_version` other than `"1"` (§1.1.1), atomic-rename failure, no `.ask/` present when one is required (run `ask init` first) |
+| `5` | I/O / disk error | cannot read/write `.ask/`, corrupt `config.json` (§7), an item file that is corrupt or carries a `schema_version` other than `"1"` (§1.1.1) when a verb addresses that item (`ask list` skips it with a warning and exits `5` only if no item was readable, §7.2), atomic-rename failure, no `.ask/` present when one is required (run `ask init` first) |
 | `6` | Already-handled idempotent no-op | `resolve` on a `resolved` item, `close` on a `closed` item, `reopen` on an `open` item, `ask init` in an already-initialized directory when no fields would change. Always paired with a stderr warning. Stdout still emits the success-shape (id or item) so scripts can pipe results uniformly. |
 | `7` | Stranded store | `.ask/config.json` is absent but `.ask/items/` holds item files (§7). Distinct from `5` so a consumer can tell "no inbox here" from "an unreachable inbox holding N asks" without inspecting `.ask/items/` itself. `ask init` in that directory is the repair; it adopts the existing items. |
 
@@ -421,7 +421,7 @@ post-filtering on the client. Composes with the other filters as AND.
 
 Defaults match the CLI: omitted `status` and no `all` → items with `status != closed`. `all: true` plus a `status` value is a validation error.
 
-Return: an array of Item objects (§1.4).
+Return: an array of Item objects (§1.4). Item files that cannot be read are skipped and reported as extra `content` entries after the array; see §7.2 for the shape.
 
 ### 5.4 `ask_show`, `ask_resolve`, `ask_reopen`, `ask_close`
 
@@ -561,6 +561,16 @@ Reporting both cases identically is how a full inbox gets counted as zero by any
 Opening a store for a read (any verb other than `ask init`) is **non-mutating**: no `.ask/` and no `.ask/items/` is created, whether the open succeeds or fails. Only `ask init` creates `.ask/`, and only the first item write creates `.ask/items/`. A read that fails must leave the directory exactly as it found it — otherwise a single `ask list` in the wrong directory enrols it permanently as a store-shaped husk that later sweeps cannot distinguish from a real one.
 
 Item files (`.ask/items/ask-XXXX.json`) follow the same policy individually: a corrupt item file makes that one id unreadable (`ask show ask-XXXX` → exit 5, `ask list` skips it and emits a stderr warning per skipped id but continues with the rest, exit 0 if at least one item was readable, exit 5 only if every requested item was unreadable). The skip-and-warn behavior is the only deviation from "no auto-recovery"; it is necessary so that one bad file does not lock the entire inbox.
+
+The details of that rule, for `ask list` and `ask_list` alike:
+
+- **Unreadable** means the file cannot be loaded as a v1 item: it is not valid JSON, it carries a `schema_version` other than `"1"` (§1.1.1), or the file itself cannot be read. Listing never rewrites, moves or deletes such a file.
+- **The warning** is one stderr line per skipped id, in id order: `ask list: skipped <id>: <reason>`, where `<reason>` is the same reason `ask show <id>` reports for that item. Warnings go to stderr only; stdout is exactly the list, so `ask list --json` stays a valid JSON array (§1.4) holding the readable items.
+- **Readability is judged before the filters run.** An unreadable file's status, urgency, `blocks` and `recipient` are unknown, so it cannot be matched against `--status` and the rest; it is always reported as skipped, whatever filters were given. The exit is `0` whenever at least one item file was readable — even if the filters then exclude every readable item, which lists nothing (`[]` under `--json`).
+- **Exit 5** is reserved for a store where item files exist and none of them is readable. The per-id warnings are followed by `ask list: no readable items (<n> unreadable)` and stdout is empty — not `[]`, which would read as an empty inbox.
+- **An empty store** (no item files at all) is not this case: it lists as empty and exits `0` with no warning.
+- **Other verbs are unaffected by a neighbour's bad file.** Id and prefix resolution reads file names, not file contents, so `show`, `update`, `resolve`, `reopen`, `close` and `new` keep working on every readable id; only a verb addressed at the unreadable item itself fails, with exit 5 and the file left byte-identical.
+- **MCP shape (`ask_list`).** Skips are a success with warnings, in the §5.5 style: `isError: false`, `content[0].text` is the JSON array of readable items (so a client parsing `content[0]` always gets an array), and each skipped id adds one further `type: "text"` entry carrying the same line the CLI writes to stderr, in id order. A store with nothing skipped returns the single entry it always has. When no item file is readable the call returns the §5.5 error envelope with `code: 5`, and since there is no stderr the one `message` names every skipped id: `ask list: no readable items (<n> unreadable): skipped <id>: <reason>; skipped <id>: <reason>`.
 
 ---
 
