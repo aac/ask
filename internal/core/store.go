@@ -151,8 +151,26 @@ func (s *FileStore) SaveConfig(cfg *ProjectConfig) error {
 	return nil
 }
 
-func (s *FileStore) itemPath(id string) string {
-	return filepath.Join(s.root, itemsSubdir, id+".json")
+// checkID refuses an id that is not a plain file-name stem. It is the
+// path-safety check behind itemPath, deliberately looser than the §4.1
+// shape (`ask-` + 4 hex): it only guarantees <id>.json names a file
+// directly inside .ask/items/. Both separators are refused on every
+// platform so a store is judged the same wherever it is read.
+func checkID(id string) error {
+	if id == "" || id == "." || strings.Contains(id, "..") || strings.ContainsAny(id, "/\\\x00") {
+		return fmt.Errorf("%w %q", ErrInvalidID, id)
+	}
+	return nil
+}
+
+// itemPath is the only place an id becomes a path. It returns ErrInvalidID
+// rather than a path for any id checkID refuses, so no caller can read,
+// write or delete outside .ask/items/ through an id.
+func (s *FileStore) itemPath(id string) (string, error) {
+	if err := checkID(id); err != nil {
+		return "", err
+	}
+	return filepath.Join(s.root, itemsSubdir, id+".json"), nil
 }
 
 // isItemFile reports whether a directory entry under .ask/items/ is one of
@@ -202,6 +220,10 @@ func (s *FileStore) Save(item *Item) error {
 	if err := checkSchemaVersion(item.SchemaVersion); err != nil {
 		return fmt.Errorf("save item %s: %w", item.ID, err)
 	}
+	path, err := s.itemPath(item.ID)
+	if err != nil {
+		return fmt.Errorf("save item: %w", err)
+	}
 	b, err := json.MarshalIndent(item, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal item %s: %w", item.ID, err)
@@ -213,16 +235,23 @@ func (s *FileStore) Save(item *Item) error {
 	if err := os.MkdirAll(itemsPath, 0o755); err != nil {
 		return fmt.Errorf("create %s: %w", itemsPath, err)
 	}
-	return atomicWrite(s.itemPath(item.ID), b)
+	return atomicWrite(path, b)
 }
 
 // Load reads a single item by its full id. Returns ErrIDNotFound if the
 // underlying file is missing (CLI maps to exit 3 per spec §4.3). A corrupt
 // item file returns a wrapped JSON error, and an item whose schema_version
 // is not CurrentSchemaVersion returns a wrapped ErrUnsupportedSchemaVersion
-// (CLI maps both to exit 5 per spec §1.1.1, §7).
+// (CLI maps both to exit 5 per spec §1.1.1, §7). So does a file whose `id`
+// member is not id itself (ErrIDMismatch): the returned item's ID always
+// equals the id asked for. An id that is not a plain file-name stem is
+// refused with ErrInvalidID before the filesystem is touched.
 func (s *FileStore) Load(id string) (*Item, error) {
-	b, err := os.ReadFile(s.itemPath(id))
+	path, err := s.itemPath(id)
+	if err != nil {
+		return nil, fmt.Errorf("load item: %w", err)
+	}
+	b, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, ErrIDNotFound
 	}
@@ -237,6 +266,9 @@ func (s *FileStore) Load(id string) (*Item, error) {
 			return nil, fmt.Errorf("item %s: %w", id, err)
 		}
 		return nil, fmt.Errorf("item %s corrupt: %w", id, err)
+	}
+	if it.ID != id {
+		return nil, fmt.Errorf("item %s: %w: %s.json holds id %q", id, ErrIDMismatch, id, it.ID)
 	}
 	return &it, nil
 }
@@ -270,7 +302,9 @@ func (s *FileStore) ListIDs() ([]string, error) {
 
 // SkippedItem names one item file List could not read, and why. Err is the
 // error Load returned for that id: a JSON decode failure, a wrapped
-// ErrUnsupportedSchemaVersion, or an I/O error on the file itself.
+// ErrUnsupportedSchemaVersion, a wrapped ErrIDMismatch, or an I/O error on
+// the file itself. ID is always the filename id, never the file's own
+// claim.
 type SkippedItem struct {
 	ID  string
 	Err error

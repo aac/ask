@@ -43,7 +43,10 @@ func schemaverItemJSON(id, member string) []byte {
 // schemaverWriteRaw places body at the store's path for id, bypassing Save.
 func schemaverWriteRaw(t *testing.T, s *FileStore, id string, body []byte) string {
 	t.Helper()
-	p := s.itemPath(id)
+	p, err := s.itemPath(id)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 		t.Fatal(err)
 	}

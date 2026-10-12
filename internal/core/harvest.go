@@ -59,9 +59,14 @@ type HarvestResult struct {
 //     ErrUnreadableSource naming every unreadable id; neither store is
 //     touched. Harvest never skips an unreadable item — skipping plus
 //     clean would lose an ask.
+//     That includes a file whose `id` member is not the id it is named
+//     for (ErrIDMismatch): the preflight above compared file names, so a
+//     file claiming another id would otherwise be written wherever its
+//     contents say (act-7ee74d).
 //   - Copy pass: each loaded item is Save'd to target.
 //   - Optional cleanup: when clean is true, after every copy succeeds the
-//     source items are removed. The two passes are ordered (all writes
+//     source files are removed — by the id each file was listed under,
+//     never by an id read out of its contents. The two passes are ordered (all writes
 //     first, then all deletes) so a copy failure never leaves a source
 //     item deleted without a corresponding target copy.
 //
@@ -121,17 +126,22 @@ func Harvest(target, source *FileStore, clean bool) (*HarvestResult, error) {
 			ErrUnreadableSource, len(unreadable), unreadable)
 	}
 
-	harvested := []string{}
-	for _, it := range items {
+	// items[i] was loaded from the file listed as srcIDs[i] (no id was
+	// skipped, or we returned above). Everything below that names a
+	// source file uses srcIDs — the listing — not it.ID.
+	for i, it := range items {
 		if err := target.Save(it); err != nil {
-			return nil, fmt.Errorf("write target %s: %w", it.ID, err)
+			return nil, fmt.Errorf("write target %s: %w", srcIDs[i], err)
 		}
-		harvested = append(harvested, it.ID)
 	}
+	harvested := append([]string{}, srcIDs...)
 
 	if clean {
 		for _, id := range harvested {
-			path := source.itemPath(id)
+			path, err := source.itemPath(id)
+			if err != nil {
+				return nil, fmt.Errorf("cleanup source: %w", err)
+			}
 			if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 				return nil, fmt.Errorf("cleanup source %s: %w", id, err)
 			}
