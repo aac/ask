@@ -120,6 +120,19 @@ Rules:
   only subs files a harvest writes; such an entry is named with its
   directory (`subs/ASK-AAAB.json`) in that same message. A source item
   with no subscriptions is not checked against `subs/`.
+  A store's own `subs/` gets the same care outside `harvest`: when it
+  holds no `<id>.json` for an item but does hold an entry matching that
+  name case-insensitively (`subs/ASK-AAAB.json` against `ask-aaab`),
+  every verb that reads or writes the item's subscriptions (`subscribe`,
+  `unsubscribe`, the text form of `show`) exits 5 naming the file and the
+  id, reads nothing from it and changes nothing. A status change
+  (`resolve`, `close`, `reopen`) still goes through and fires nothing,
+  as with any unreadable subs file. When `<id>.json` is there too, which
+  only a case-sensitive filesystem allows, it is the item's subs file
+  and the other entry is left alone, as a stray in `items/` is beside a
+  real item (§4.3). The check compares names, so it is the same on
+  either kind of filesystem. `ask show --json` is the item alone and
+  does not read `subs/`.
 - **Write path refusal:** `core.FileStore.Save` refuses to write an Item
   whose `schema_version` is anything other than `"1"`, so no code path
   can produce or overwrite a non-v1 item file.

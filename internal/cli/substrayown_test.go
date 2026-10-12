@@ -50,7 +50,9 @@ func TestSubstrayOwnAcceptance(t *testing.T) {
 			t.Errorf("%v: stdout shows the stray's subscription: %q", args, stdout)
 		}
 	}
+	// A refused write still took the store lock, which leaves its file.
 	after := idguardTree(t, dir)
+	delete(after, filepath.Join(".ask", ".lock"))
 	if len(before) != len(after) {
 		t.Errorf("store files changed: before %d, after %d", len(before), len(after))
 	}

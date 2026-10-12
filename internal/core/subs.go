@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 )
@@ -156,14 +157,74 @@ func (s *FileStore) subsPath(id string) (string, error) {
 	return filepath.Join(s.root, subsSubdir, id+".json"), nil
 }
 
+// ErrStraySubs is returned by LoadSubs, and by every write of a subs file,
+// when the store's subs directory holds no <id>.json for the item but does
+// hold an entry whose name matches it under case folding: ASK-AAAB.json
+// against ask-aaab. On a case-insensitive filesystem that entry would be
+// read as the item's subscriptions and written back under its own name
+// (act-7c6b02). The message names each such file; nothing is read from it
+// or written to it.
+var ErrStraySubs = errors.New("stray file(s) in the way of the item's subs file, differing from its name only in case")
+
+// straySubsNames picks, out of the names in a subs directory, the ones in
+// the way of id's subs file: those matching <id>.json under case folding
+// but not exactly. When <id>.json itself is among the names there are
+// none, since the real file wins and the others (which only a
+// case-sensitive filesystem can hold beside it) are left alone, as a
+// stray in items/ is beside a real item.
+func straySubsNames(names []string, id string) []string {
+	want := id + ".json"
+	var strays []string
+	for _, n := range names {
+		if n == want {
+			return nil
+		}
+		if strings.EqualFold(n, want) {
+			strays = append(strays, n)
+		}
+	}
+	sort.Strings(strays)
+	return strays
+}
+
+// checkSubsStray returns ErrStraySubs when a stray stands where id's subs
+// file would be. It compares directory entry names and never probes the
+// filesystem with the path, so the answer is the same whether or not the
+// filesystem folds case. A missing subs directory holds no stray.
+func (s *FileStore) checkSubsStray(id string) error {
+	entries, err := os.ReadDir(filepath.Join(s.root, subsSubdir))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("read %s dir: %w", subsSubdir, err)
+	}
+	names := make([]string, len(entries))
+	for i, e := range entries {
+		names[i] = e.Name()
+	}
+	strays := straySubsNames(names, id)
+	if len(strays) == 0 {
+		return nil
+	}
+	for i, n := range strays {
+		strays[i] = ".ask/" + subsSubdir + "/" + n
+	}
+	return fmt.Errorf("subscriptions of %s: %w: %s", id, ErrStraySubs, strings.Join(strays, ", "))
+}
+
 // LoadSubs reads the subscriptions of the item with full id. An item with
 // no subs file has none: the result is an empty SubsFile, and nothing is
 // created on disk. A file that does not parse, carries another
-// schema_version, or names another item is an error.
+// schema_version, or names another item is an error, and so is a stray
+// file in the way of the item's own (ErrStraySubs).
 func (s *FileStore) LoadSubs(id string) (*SubsFile, error) {
 	path, err := s.subsPath(id)
 	if err != nil {
 		return nil, fmt.Errorf("load subscriptions: %w", err)
+	}
+	if err := s.checkSubsStray(id); err != nil {
+		return nil, err
 	}
 	b, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
@@ -189,11 +250,15 @@ func (s *FileStore) LoadSubs(id string) (*SubsFile, error) {
 }
 
 // saveSubs writes f atomically, or removes the file when f holds no
-// subscriptions. The caller holds the store lock.
+// subscriptions. The caller holds the store lock. It refuses with
+// ErrStraySubs rather than write into, or remove, a stray in the way.
 func (s *FileStore) saveSubs(f *SubsFile) error {
 	path, err := s.subsPath(f.Item)
 	if err != nil {
 		return fmt.Errorf("save subscriptions: %w", err)
+	}
+	if err := s.checkSubsStray(f.Item); err != nil {
+		return err
 	}
 	if len(f.Subscriptions) == 0 {
 		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {

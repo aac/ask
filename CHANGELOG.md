@@ -108,6 +108,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   naming it as `subs/ASK-AAAB.json`, copying and removing nothing, in the same message as the
   other harvest refusals. A source item with no subscriptions writes nothing under `subs/`,
   so a stray matching only such an item does not refuse the harvest.
+- A stray file in a store's own `.ask/subs/` is no longer taken for an item's subscriptions.
+  With `ask-aaab` and a hand-placed `subs/ASK-AAAB.json`, on a case-insensitive filesystem
+  `ask show aaab` listed the stray's subscriptions, `ask subscribe` and `ask unsubscribe`
+  rewrote it under its own name, and a status change fired what it held. Those three verbs
+  now exit 5 naming `.ask/subs/ASK-AAAB.json`, changing nothing, and a status change fires
+  nothing. It compares names, so the refusal is the same on a case-sensitive filesystem; a
+  real `ask-aaab.json` beside the stray (possible only there) is used as before.
 - Two writers of one item can no longer overwrite each other. `resolve`, `reopen`, `close`
   and `update` (and the MCP `ask_resolve` / `ask_reopen` / `ask_close` / `ask_update` tools) loaded an
   item,
