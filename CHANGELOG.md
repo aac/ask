@@ -72,6 +72,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a human's inbox.
 
 ### Fixed
+- `ask harvest`'s refusal for a stray source file (a name like `ASK-AAAB.json` that is not an
+  id) names the file — `stray file in .ask/items/ not named for an id: ASK-AAAB.json` — in the
+  words `ask list` and `ask show` already use, instead of `invalid ask id "ASK-AAAB"`.
 - The store refuses any item id that is not exactly `ask-` plus four lowercase hex characters,
   the shape it generates. It used to accept any path-safe string, so on a case-insensitive
   filesystem (the macOS default) `ask harvest` from a store holding `ASK-AAAA.json` passed the

@@ -64,7 +64,8 @@ func TestStrayShowAcceptance(t *testing.T) {
 }
 
 // TestStrayHarvestNamesCollisionAndStray: one `ask harvest` run reports
-// both the id collision and the stray source file, and copies nothing.
+// both the id collision and the stray source file, and copies nothing. The
+// stray is named as a file, in the words list and show use (act-5f279f).
 func TestStrayHarvestNamesCollisionAndStray(t *testing.T) {
 	tmp := t.TempDir()
 	src, tgt := filepath.Join(tmp, "src"), filepath.Join(tmp, "tgt")
@@ -84,7 +85,7 @@ func TestStrayHarvestNamesCollisionAndStray(t *testing.T) {
 		t.Errorf("harvest: exit %d, want 5 (stderr %q)", code, stderr)
 	}
 	if !strings.Contains(stderr, "collision") || !strings.Contains(stderr, "ask-aaaa") ||
-		!strings.Contains(stderr, `invalid ask id "ASK-AAAB"`) {
+		!strings.Contains(stderr, "stray file in .ask/items/ not named for an id: ASK-AAAB.json") {
 		t.Errorf("harvest: stderr must name the collision and the stray, got %q", stderr)
 	}
 	if stdout != "" {
