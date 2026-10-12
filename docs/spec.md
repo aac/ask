@@ -330,7 +330,8 @@ Implements act's prefix-resolution policy:
 - Tool names: `ask_new`, `ask_list`, `ask_show`, `ask_update`, `ask_resolve`, `ask_reopen`, `ask_close`. (`init` and `harvest` are **not** exposed via MCP — setting up or administering a store is a developer action, not something an agent does to an item mid-loop.)
 - Required vs optional in each schema mirrors CLI requiredness.
 - Every `maxLength` a schema advertises is enforced by the server, not left to the client: a longer value is a validation error (code 2, §5.5) whose message names the field and the limit, e.g. `ask new: body exceeds 16384 characters (got 16385)`, and nothing is written. Length is counted in characters (Unicode code points), as JSON Schema defines `maxLength`. These are limits of the MCP boundary; the CLI does not apply the free-text caps.
-- Response framing: every tool returns `{ "content": [{ "type": "text", "text": "<json>" }], "isError": false }` where `<json>` is the same payload the CLI emits with `--json`. The JSON-encoded payload is in the `text` field (single-string convention; agents JSON-parse the `text`).
+- Response framing: every tool returns `{ "content": [{ "type": "text", "text": "<json>" }] }` on success, where `<json>` is the same payload the CLI emits with `--json`. The JSON-encoded payload is in the `text` field (single-string convention; agents JSON-parse the `text`).
+- `isError` is **omitted** from a successful result — the key is absent, not `false`. Per MCP an absent `isError` means false, so a client must read it as "false unless present and true" rather than require the key. It is present, as `true`, only on the §5.5 error envelope. Where this document says a result is "`isError: false`" it means that reading: no `isError` key on the wire.
 
 ### 5.2 `ask_new`
 

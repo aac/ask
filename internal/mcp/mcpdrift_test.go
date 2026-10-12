@@ -1,6 +1,8 @@
 package mcp
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -20,6 +22,74 @@ func mcpdriftCall(t *testing.T, root, tool string, args map[string]any) toolResu
 		"params": map[string]any{"name": tool, "arguments": args},
 	})
 	return extractToolResult(t, resp)
+}
+
+// mcpdriftRawResult sends one tools/call and returns the `result` object
+// as the keys actually on the wire. The typed toolResult cannot tell an
+// absent isError from `"isError": false`; this can.
+func mcpdriftRawResult(t *testing.T, root, tool string, args map[string]any) map[string]json.RawMessage {
+	t.Helper()
+	in := &bytes.Buffer{}
+	if err := json.NewEncoder(in).Encode(map[string]any{
+		"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+		"params": map[string]any{"name": tool, "arguments": args},
+	}); err != nil {
+		t.Fatalf("encode req: %v", err)
+	}
+	out := &bytes.Buffer{}
+	if err := NewServer(root, in, out).Serve(context.Background()); err != nil {
+		t.Fatalf("serve: %v", err)
+	}
+	var env struct {
+		Result map[string]json.RawMessage `json:"result"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &env); err != nil {
+		t.Fatalf("decode response: %v\nbody: %.300s", err, out.String())
+	}
+	if env.Result == nil {
+		t.Fatalf("no result object on the wire: %.300s", out.String())
+	}
+	return env.Result
+}
+
+// TestIsErrorOmittedOnSuccess pins the wire shape spec §5.1 documents: a
+// successful result has no isError key (absent means false, per MCP), and
+// an error result carries `"isError": true`. Covers a plain success, the
+// two-part no-op envelope, and an error.
+func TestIsErrorOmittedOnSuccess(t *testing.T) {
+	root := t.TempDir()
+	initRepo(t, root)
+	it := mcpupdNew(t, root, "seed", "", 1)
+
+	successes := []struct {
+		name, tool string
+		args       map[string]any
+	}{
+		{"ask_new", "ask_new", map[string]any{"title": "another"}},
+		{"ask_list", "ask_list", map[string]any{}},
+		{"ask_show", "ask_show", map[string]any{"id": it.ID}},
+		{"ask_update", "ask_update", map[string]any{"id": it.ID, "body": "b"}},
+		{"ask_reopen no-op", "ask_reopen", map[string]any{"id": it.ID}},
+		{"ask_resolve", "ask_resolve", map[string]any{"id": it.ID}},
+	}
+	for _, tc := range successes {
+		t.Run(tc.name, func(t *testing.T) {
+			res := mcpdriftRawResult(t, root, tc.tool, tc.args)
+			if raw, present := res["isError"]; present {
+				t.Fatalf("success result carries isError=%s; the key must be absent", raw)
+			}
+			if _, ok := res["content"]; !ok {
+				t.Fatalf("success result has no content: %v", res)
+			}
+		})
+	}
+
+	t.Run("error carries isError true", func(t *testing.T) {
+		res := mcpdriftRawResult(t, root, "ask_show", map[string]any{"id": "ask-ffff"})
+		if string(res["isError"]) != "true" {
+			t.Fatalf("error result isError: got %q want true", res["isError"])
+		}
+	})
 }
 
 // mcpdriftSnapshot reads every item file in the store, keyed by file

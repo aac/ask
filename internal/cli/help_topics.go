@@ -284,10 +284,10 @@ Tools
 
 Response envelope
   Every successful call returns:
-    { "content": [{ "type":"text", "text":"<json>" }],
-      "isError": false }
+    { "content": [{ "type":"text", "text":"<json>" }] }
   The text field is the same JSON the CLI emits with --json. Agents
-  JSON-parse the text.
+  JSON-parse the text. A successful result carries no isError key at
+  all; absent means false. isError appears, as true, only on errors.
 
 Error envelope
   On any non-success outcome:
@@ -316,16 +316,14 @@ Example transcript
                                  "timeout_seconds":60 } } } }
   <- { "jsonrpc":"2.0", "id":2,
        "result":{ "content":[{"type":"text",
-                              "text":"{\"id\":\"ask-3c89\",\"title\":\"Set up Gmail OAuth\",...}"}],
-                  "isError":false } }
+                              "text":"{\"id\":\"ask-3c89\",\"title\":\"Set up Gmail OAuth\",...}"}] } }
 
   -> { "jsonrpc":"2.0", "id":3, "method":"tools/call",
        "params":{ "name":"ask_list",
                   "arguments":{ "status":["open"], "urgency":["blocker"] } } }
   <- { "jsonrpc":"2.0", "id":3,
        "result":{ "content":[{"type":"text",
-                              "text":"[{\"id\":\"ask-3c89\",...}]"}],
-                  "isError":false } }
+                              "text":"[{\"id\":\"ask-3c89\",...}]"}] } }
 `
 
 const schemaTopic = `ask help schema — Item fields and project config
