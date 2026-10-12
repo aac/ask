@@ -157,6 +157,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   1024-character value in a non-ASCII script (2048 bytes or more) was refused on both; the
   MCP schema already advertised the limit in characters. Both now use one validator, and
   the `ask list --recipient` / `--blocks` filters on the CLI count the same way.
+- MCP `ask_list` counts its `recipient` and `blocks` filters in characters too. It still
+  counted bytes, so an item filed with a 1024-character non-ASCII ref (accepted by `ask new`
+  and `ask_new`) could not be filtered for through MCP: the filter was refused with
+  `recipient: ref exceeds 1024 characters`. It now uses the same validator as the rest.
 - The title limit is 200 characters, not 200 bytes. `ask new`, `ask update --title` and the
   MCP `ask_new` / `ask_update` tools counted bytes, so a 200-character title in a non-ASCII
   script was refused with `title must be 1..200 characters`. All four now count Unicode code

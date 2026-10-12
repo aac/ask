@@ -483,22 +483,16 @@ func listBody(repoRoot string, raw json.RawMessage) (body string, skipped []core
 	// per-flag shape but flattened: only one ref is sensible per call
 	// from an orchestrator that knows the act id it's coordinating).
 	if args.Blocks != "" {
-		if strings.TrimSpace(args.Blocks) == "" {
-			return fail(2, "ask list: blocks: ref must not be empty or whitespace-only")
-		}
-		if len(args.Blocks) > maxBlocksRefLen {
-			return fail(2, fmt.Sprintf("ask list: blocks: ref exceeds %d characters", maxBlocksRefLen))
+		if msg, ok := core.ValidateRef("blocks", args.Blocks); !ok {
+			return fail(2, "ask list: "+msg)
 		}
 	}
 	// MCP `recipient` filter is a single string (same convention as
-	// `blocks`). Validated the same way: non-empty after trim and
-	// within the per-ref cap.
+	// `blocks`). Validated the same way: core.ValidateRef, the rule
+	// ask_new and the CLI apply, counting characters, not bytes.
 	if args.Recipient != "" {
-		if strings.TrimSpace(args.Recipient) == "" {
-			return fail(2, "ask list: recipient: ref must not be empty or whitespace-only")
-		}
-		if len(args.Recipient) > maxRecipientRefLen {
-			return fail(2, fmt.Sprintf("ask list: recipient: ref exceeds %d characters", maxRecipientRefLen))
+		if msg, ok := core.ValidateRef("recipient", args.Recipient); !ok {
+			return fail(2, "ask list: "+msg)
 		}
 	}
 	if msg, bad := schemaViolation("ask_list", raw); bad {
