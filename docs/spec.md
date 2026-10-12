@@ -227,7 +227,7 @@ The full taxonomy. Every CLI invocation returns exactly one of these.
 Notes:
 
 - `1` is intentionally unused so that Go's default `exit(1)` from an uncaught panic remains distinguishable from any deliberate exit.
-- Concurrent writes that lose a last-write race fall under `5`.
+- Writers of one store are serialized by the store lock (§8). A writer that cannot take the lock within 10 s exits `5` with `ask <verb>: store is locked by another ask process (waited 10s); nothing was written` on stderr; the MCP tools return the same message with code `5`. Nothing has been written when that happens, so the call can be retried as is.
 - `--help` / `-h` / `ask help [valid-topic]` always return `0`. An unknown help topic returns `2`.
 - Exit code 6 supersedes 0 for idempotent no-ops so that scripts that care can branch on it; scripts that don't care can treat `0` and `6` as equivalent (both leave the system in the desired state).
 
@@ -306,7 +306,7 @@ Within a single project, the namespace is 2^16 ≈ 65,536 ids. At ≥256 items, 
 3. Hard cap: 1024 retries. On overflow, exit code 5 with stderr message `id collision retries exceeded; .ask/items/ may be at capacity`.
 4. The final `created_at` written into the item file matches the value used in the hash that produced the chosen id. Callers do not see the nudged timestamp unless they `ask show` immediately after; the nudge is at most 1µs in practice.
 
-Concurrent writers: the directory re-read is the only collision check. Two simultaneous `ask new` calls on different processes can race and produce the same id; the second `os.Rename` will overwrite the first. This is documented as out of scope for v1 (single human, single machine, single agent at a time in any given project — same v1 audience as the brief's §Concurrent safety). Reconsider if dogfooding shows the race.
+Concurrent writers: the directory re-read is the only collision check, and `ask new` does not take the store lock. Two simultaneous `ask new` calls on different processes can race and produce the same id; the second `os.Rename` will overwrite the first. This is still out of scope. Writers of an existing item (`resolve`, `reopen`, `close`, `update`, `harvest`) are a different case: they are serialized by the store lock (§8), so any number of agents may write to one store at once. Reconsider the `ask new` race if dogfooding shows it.
 
 ### 4.3 Prefix lookup
 
@@ -581,21 +581,36 @@ The details of that rule, for `ask list` and `ask_list` alike:
 
 ---
 
-## 8. Atomic rename on Windows
+## 8. Atomic writes and the store lock
 
-Every mutation to `.ask/config.json` or any `.ask/items/ask-XXXX.json` uses the same pattern:
+### 8.1 Atomic rename
+
+Every write to `.ask/config.json` or any `.ask/items/ask-XXXX.json` uses the same pattern:
 
 1. Marshal JSON.
-2. Write to `<target>.tmp` in the same directory (same-volume guarantee for rename atomicity).
-3. `os.Rename(<target>.tmp, <target>)`.
+2. Write to `<target>.<random>.tmp` in the same directory (same-volume guarantee for rename atomicity). The random part is 16 hex characters, fresh for every write, and the file is created exclusively, so two writers of one target never share a temp file.
+3. `os.Rename(<that temp file>, <target>)`.
 
-`os.Rename` on Windows is atomic for same-volume renames as of Go 1.5+, including rename-over-existing files (Go uses `MoveFileEx` with `MOVEFILE_REPLACE_EXISTING`). This is the inherited semantics ask relies on. The spec does **not** wrap rename with any retry or fallback in v1.
+A reader therefore sees either the whole old file or the whole new one, never a partial write. The spec does **not** wrap rename with any retry or fallback.
 
 Edge cases:
 
-- `<target>.tmp` already exists from a prior crashed write: `os.Rename` overwrites it during the write step (Go's `os.OpenFile` with `O_TRUNC` clobbers the partial file). No staleness handling needed.
-- Antivirus or file-indexers holding a transient handle on Windows can fail `os.Rename` with a "process cannot access the file" error: this surfaces as exit 5 with the OS error verbatim. v1 does not retry; if it becomes a real issue in dogfooding, add a short bounded retry loop in core/store.
-- The `.tmp` files are written under the same directory as the target so `os.Rename` never crosses volumes.
+- A write that crashes between steps 2 and 3 leaves its temp file behind. It still ends in `.tmp`, so every reader of `.ask/items/` skips it; nothing removes it. No staleness handling is needed, because no later write reuses the name.
+- The temp files are written under the same directory as the target so `os.Rename` never crosses volumes.
+
+### 8.2 The store lock
+
+Atomic rename keeps one write whole; it does not stop two writers from each loading an item, changing their copy, and saving it, the second save discarding the first change. One advisory lock per store does:
+
+- The lock is `flock(LOCK_EX)` on `.ask/.lock`. The file is created by the first write that needs it and is never removed; its content is never read.
+- `resolve`, `reopen`, `close` and `update`, on the CLI, and `ask_resolve`, `ask_reopen`, `ask_close` and `ask_update` over MCP, hold the lock across the whole sequence: resolve the id prefix, load the item, apply the change, save. Both surfaces call one function for this, so they cannot drift apart.
+- `ask harvest` holds the target's and the source's locks for the whole operation, taken in path order so two harvests in opposite directions cannot each hold one.
+- The lock is taken by trying a non-blocking `flock` every 25 ms for at most 10 s. On timeout the verb exits `5` (MCP code `5`) with `ask <verb>: store is locked by another ask process (waited 10s); nothing was written`. Every locked section is a few milliseconds, so the timeout only fires when another process is stuck while holding the lock. A process that dies releases its lock.
+- Reads (`list`, `show`, and their MCP tools) take no lock, never wait on a writer, and never create `.ask/.lock`.
+- `ask new` and `ask init` take no lock. `ask new` writes a file no other writer has loaded; its only race is the id collision described in §4.2.
+- The command's time is read once, before the lock is taken, and that one value is what a transition stamps (`resolved_at`, `closed_at`, `verified_at`).
+
+The lock is advisory and unix-only (`flock`); ask builds for darwin and linux. It serializes ask processes on one host. Two hosts writing one store over a network filesystem are outside what it promises.
 
 ---
 
@@ -697,7 +712,7 @@ This section confirms every spec-deferred item the brief mentions is resolved ab
 | §Lifecycle: `verification_output` truncation | §1.1 — 65536 char cap with marker |
 | §Verification: cwd = `.ask/` parent | §9 |
 | §Verification: env inheritance | §9 — full env, no allowlist |
-| §Concurrent safety: atomic rename via `<x>.tmp` | §8 — `os.Rename`, Windows semantics inherited |
+| §Concurrent safety: atomic rename via `<x>.tmp` | §8.1 — `os.Rename` of a uniquely named temp file; §8.2 adds the store lock |
 | §Concurrent safety: idempotent verbs | §1.8 + §2 — exit 6 + stderr warning |
 | §CLI surface: `--json` on every relevant verb | §1.1–§1.10 |
 | §CLI surface: `ask init` gitignore handling | §6.1 — append if missing, create only inside git repo |
@@ -713,7 +728,7 @@ This section confirms every spec-deferred item the brief mentions is resolved ab
 
 **v1: deferred items** (intentionally not pinned by this spec; tracked for post-v1):
 
-- Concurrent-resume safety (two agents picking up the same `resolved` item). Documented out of scope in brief §Concurrent safety; revisit if dogfooding surfaces real loss.
+- Concurrent-resume safety (two agents picking up the same `resolved` item and both acting on it). The store lock (§8.2) means only one of two concurrent transitions wins and the other sees exit 6, but ask does not hand out claims on a resolved item; revisit if dogfooding surfaces real loss.
 - Concurrent `ask new` from two processes colliding on id. Documented in §4.2.
 - Verifier execution by `ask` itself (`ask verify <id>` verb). Not in v1 surface; would be additive.
 - Aggregated cross-project inbox, TUI, web UI, push notifications, custom item types. Listed in brief §Out of scope; spec adds nothing.

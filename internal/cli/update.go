@@ -5,12 +5,12 @@
 package cli
 
 import (
-	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/aac/ask/internal/core"
 )
@@ -108,33 +108,11 @@ func runUpdate(args []string) int {
 	if code != 0 {
 		return code
 	}
-	ids, err := store.ListIDs()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "ask update: %v\n", err)
-		return 5
-	}
-	full, err := core.ResolvePrefix(fs.Arg(0), ids)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "ask update: %v\n", err)
-		switch {
-		case errors.Is(err, core.ErrIDNotFound):
-			return 3
-		case errors.Is(err, core.ErrIDAmbiguous):
-			return 4
-		}
-		return 5
-	}
-	it, err := store.Load(full)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "ask update: %v\n", err)
-		if errors.Is(err, core.ErrIDNotFound) {
-			return 3
-		}
-		return 5
-	}
-
 	// The edit itself is core.TextUpdate, shared with the ask_update MCP
-	// tool so the two surfaces cannot drift.
+	// tool so the two surfaces cannot drift. It runs inside core.Mutate,
+	// under the store lock, so an append lands on the body as it is on disk
+	// at that moment rather than on a copy another writer has since
+	// replaced.
 	upd := core.TextUpdate{}
 	if set["title"] {
 		upd.Title = title
@@ -145,21 +123,24 @@ func runUpdate(args []string) int {
 	case set["body-append"], set["body-append-file"]:
 		upd.BodyAppend = &appendBody
 	}
-	changed := upd.Apply(it)
+	ch, err := store.Mutate(fs.Arg(0), time.Now().UTC(), func(it *core.Item, _ time.Time) error {
+		upd.Apply(it)
+		return nil
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ask update: %v\n", err)
+		return mutateErrExit(err)
+	}
+	it := ch.Item
 
 	// No-op envelope (spec §1.8 + §2): the item already reads exactly as
-	// requested. Skip the write so a non-mutation doesn't touch mtime, and
-	// return 6 so scripts that care can branch; stdout still emits the
-	// success shape.
-	if !changed {
+	// requested. Nothing was written, so a non-mutation doesn't touch
+	// mtime; return 6 so scripts that care can branch. Stdout still emits
+	// the success shape.
+	if !ch.Changed {
 		fmt.Fprintf(os.Stderr, "ask update: %s already reads as requested\n", it.ID)
 		emitUpdated(it, *asJSON, "unchanged")
 		return 6
-	}
-
-	if err := store.Save(it); err != nil {
-		fmt.Fprintf(os.Stderr, "ask update: %v\n", err)
-		return 5
 	}
 	emitUpdated(it, *asJSON, "updated")
 	return 0

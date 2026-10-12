@@ -27,7 +27,7 @@ func runReopen(args []string) int {
 			"ask reopen <id> [flags]",
 			"Reopen a resolved item (resolved → open). --reason captures the failure detail.")
 	}
-	return mutate("reopen", fs.Args(), *asJSON, func(it *core.Item) error {
-		return core.Reopen(it, *reason, time.Now().UTC())
+	return mutate("reopen", fs.Args(), *asJSON, func(it *core.Item, now time.Time) error {
+		return core.Reopen(it, *reason, now)
 	})
 }
