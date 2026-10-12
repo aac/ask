@@ -1059,6 +1059,74 @@ func TestFireRunnerProtocolMismatch(t *testing.T) {
 	}
 }
 
+// TestFireRunnerRefusesArgumentsNoStatusChangeProduces: the runner's event,
+// statuses and time reach the handler's environment and stdin, so a runner
+// handed values no status change can produce records a mismatch and runs
+// nothing.
+func TestFireRunnerRefusesArgumentsNoStatusChangeProduces(t *testing.T) {
+	bin, _ := fireBinaries(t)
+	w := newFireWorld(t, bin)
+	w.install("record", "#!/bin/sh\necho ran > \"$HOME/fire.marker\"\n")
+	id := w.newItem("bad args")
+	sub := w.subscribe(id, "any", "record")
+
+	bad := [][]string{
+		{"resolve\nINJECTED=1", "open", "resolved", "2026-01-02T03:04:05Z"},
+		{"close", "open", "resolved", "2026-01-02T03:04:05Z"},
+		{"resolve", "open", "done", "2026-01-02T03:04:05Z"},
+		{"resolve", "resolved", "resolved", "2026-01-02T03:04:05Z"},
+		{"resolve", "open", "resolved", "yesterday"},
+	}
+	for _, tail := range bad {
+		w.mustRun(0, append([]string{"__fire", "v1", id, sub, "0123abcd"}, tail...)...)
+	}
+	lines := w.fireLines(id)
+	checkLineShapes(t, lines)
+	if len(lines) != len(bad) {
+		t.Fatalf("%d record lines for %d runs:\n%s", len(lines), len(bad), fireDump(lines))
+	}
+	for _, l := range lines {
+		if l.State != "spawn_failed" || fireDetail(l) != "runner protocol mismatch" {
+			t.Errorf("record line %s", l.raw)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(w.home, "fire.marker")); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("the handler ran on arguments no status change produces")
+	}
+}
+
+// TestFireRunnerRechecksStoredArguments: a subs file edited by hand into
+// arguments subscribe would refuse does not put them in a handler's
+// environment.
+func TestFireRunnerRechecksStoredArguments(t *testing.T) {
+	bin, _ := fireBinaries(t)
+	w := newFireWorld(t, bin)
+	w.install("record", "#!/bin/sh\necho ran > \"$HOME/fire.marker\"\n")
+	id := w.newItem("edited subs")
+	w.subscribe(id, "resolve", "record", "--arg", "thread=abc")
+	subsPath := filepath.Join(w.proj, ".ask", "subs", id+".json")
+	b, err := os.ReadFile(subsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	edited := strings.Replace(string(b), `"thread"`, `"x=1\nLD_PRELOAD"`, 1)
+	if edited == string(b) {
+		t.Fatalf("subs file has no thread argument to edit:\n%s", b)
+	}
+	if err := os.WriteFile(subsPath, []byte(edited), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	w.mustRun(0, "resolve", id)
+	lines := w.waitResults(id, 1)
+	r := firePhase(lines, "result")[0]
+	if r.State != "spawn_failed" || !strings.Contains(fireDetail(r), "invalid argument key") {
+		t.Errorf("result line %s", r.raw)
+	}
+	if _, err := os.Stat(filepath.Join(w.home, "fire.marker")); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("the handler ran with arguments subscribe would refuse")
+	}
+}
+
 // TestFireSubscriptionRemovedBeforeRun: a subscription removed between the
 // status change and the runner's start is not run, and the record says so.
 func TestFireSubscriptionRemovedBeforeRun(t *testing.T) {
