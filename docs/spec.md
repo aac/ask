@@ -45,22 +45,24 @@ Field constraints:
 |---|---|---|---|
 | `schema_version` | string | yes | on-disk schema marker; current value `"1"`; see §1.1.1 |
 | `id` | string | yes | `^ask-[0-9a-f]{4}$` |
-| `title` | string | yes | 1..200 chars after trim; rejects newlines |
-| `body` | string | yes | 0..16384 chars; default `""` |
+| `title` | string | yes | 1..200 chars after trim, counted in characters (Unicode code points), not bytes; rejects newlines. Enforced by the CLI and the MCP server alike |
+| `body` | string | yes | default `""`; ≤16384 chars per MCP argument, unbounded through the CLI (see the note below the table) |
 | `urgency` | string | yes | one of `blocker`, `normal`, `fyi`; default `normal` |
 | `status` | string | yes | one of `open`, `resolved`, `closed` |
-| `filed_by` | string\|null | no | free-form ≤256 chars; see §10 |
+| `filed_by` | string\|null | no | free-form; ≤256 chars per MCP argument; see §10 |
 | `recipient` | string\|null | no | free-form 1..1024 chars, non-whitespace; opaque agent-to-agent label (e.g. `agent:data-prep`, `human:andrew`, `team:reviewers`); absent = implicit human ("the user of this .ask/"); see §13 |
-| `tracker_ref` | string\|null | no | free-form ≤256 chars |
+| `tracker_ref` | string\|null | no | free-form; ≤256 chars per MCP argument |
 | `verifier` | object\|null | no | see §1.2 |
 | `links` | array | yes | array of `{label,url}` objects; empty array if none; max 32 links; `label` 1..120 chars; `url` 1..2048 chars; URL is not validated beyond non-empty |
 | `blocks` | array | yes | array of opaque cross-tool refs (strings) this ask is blocking; empty array if none; each ref 1..1024 chars, non-whitespace (no further format constraint — ask never interprets the value, orchestrators do). Typical refs are `act-XXXX` ids but any string is accepted. |
-| `resolution_note` | string\|null | no | ≤16384 chars |
+| `resolution_note` | string\|null | no | ≤16384 chars per MCP argument |
 | `verification_output` | string\|null | no | ≤65536 chars; longer values are truncated with a trailing `\n[truncated]\n` marker |
 | `created_at` | string | yes | RFC 3339 UTC with `Z` suffix and nanosecond precision when nonzero, otherwise second precision (Go default for `time.Time.MarshalJSON` with UTC) |
 | `resolved_at` | string\|null | no | RFC 3339 UTC |
 | `verified_at` | string\|null | no | RFC 3339 UTC |
 | `closed_at` | string\|null | no | RFC 3339 UTC |
+
+**Which limits bind where.** The CLI enforces the `title` limit and the 1..1024 limit on each `blocks` ref and on `recipient`. It applies no length cap to the free-text fields: `body`, `filed_by`, `tracker_ref`, the verifier command, and the note or reason behind `resolution_note`. Those caps are limits of the MCP boundary (§5.1), applied to each argument a client sends, and are not a property of a stored item: an item filed or edited through the CLI may hold a longer value, and every reader must accept one. The CLI is left unbounded on purpose. Agents do file long bodies (two of 789 live items measured on 2026-10-12 had bodies over 16384 characters, the longest 24388), and an ask refused at filing time is the worst failure this tool can have: the item that needed a human is simply lost.
 
 ### 1.1.1 `schema_version`
 
@@ -175,7 +177,7 @@ Flags (the body flags are mutually exclusive; supplying more than one is a valid
 
 | Flag | Meaning |
 |---|---|
-| `--title=<text>` | Replace the title. Same validation as `ask new`: non-empty after trim, 1..200 chars, no newlines. Leading/trailing whitespace is trimmed. |
+| `--title=<text>` | Replace the title. Same validation as `ask new`: non-empty after trim, 1..200 characters (not bytes), no newlines. Leading/trailing whitespace is trimmed. |
 | `--body=<text>` | Replace the body. An explicitly supplied empty string (`--body ""`) clears it; an omitted flag leaves it alone. |
 | `--body-file=<path>` | Replace the body with the UTF-8 contents of `path`. `-` reads stdin. |
 | `--body-append=<text>` | Append to the existing body, separated by a blank line. An empty existing body yields the addition alone (no leading blank line). |
@@ -335,7 +337,7 @@ Implements act's prefix-resolution policy:
 
 - Tool names: `ask_new`, `ask_list`, `ask_show`, `ask_update`, `ask_resolve`, `ask_reopen`, `ask_close`. (`init` and `harvest` are **not** exposed via MCP — setting up or administering a store is a developer action, not something an agent does to an item mid-loop.)
 - Required vs optional in each schema mirrors CLI requiredness.
-- Every `maxLength` a schema advertises is enforced by the server, not left to the client: a longer value is a validation error (code 2, §5.5) whose message names the field and the limit, e.g. `ask new: body exceeds 16384 characters (got 16385)`, and nothing is written. Length is counted in characters (Unicode code points), as JSON Schema defines `maxLength`. These are limits of the MCP boundary; the CLI does not apply the free-text caps.
+- Every `maxLength` a schema advertises is enforced by the server, not left to the client: a longer value is a validation error (code 2, §5.5) whose message names the field and the limit, e.g. `ask new: body exceeds 16384 characters (got 16385)`, and nothing is written. Length is counted in characters (Unicode code points), as JSON Schema defines `maxLength`. These are limits of the MCP boundary, applied to each argument a call sends and never to what is already stored; the CLI does not apply the free-text caps (§1.1 says which limits it does apply, and why the rest are left off). The `title` limit is the exception that both surfaces share, counted the same way.
 - The same holds for every other constraint a schema advertises — `required`, `minLength`, `maxItems`, `minimum` / `maximum`, `enum`, and `additionalProperties: false` at every depth: the server checks each call's arguments against the schema it advertises, and a violation is a validation error (code 2, §5.5) naming the argument and the bound, with nothing written. Examples: `ask new: links exceeds 32 items (got 33)`, `ask new: verifier.timeout_seconds must be between 1 and 3600 (got 0)`, `ask show: unknown argument "note" (accepted: id)`. An optional argument is omitted to leave it unset; an explicit empty string where the schema says `minLength: 1` or lists an `enum` is a violation, not "unset". An explicit JSON `null` is read as the argument being absent, at every depth: an optional argument sent as `null` takes its default or is left unchanged exactly as if the key were missing (`"body": null` on `ask_update` does not clear the body), and a `required` argument sent as `null` is missing (code 2). `title` is the one argument measured after trimming surrounding whitespace.
 - Response framing: every tool returns `{ "content": [{ "type": "text", "text": "<json>" }] }` on success, where `<json>` is the same payload the CLI emits with `--json`. The JSON-encoded payload is in the `text` field (single-string convention; agents JSON-parse the `text`).
 - `isError` is **omitted** from a successful result — the key is absent, not `false`. Per MCP an absent `isError` means false, so a client must read it as "false unless present and true" rather than require the key. It is present, as `true`, only on the §5.5 error envelope. Where this document says a result is "`isError: false`" it means that reading: no `isError` key on the wire.
@@ -478,7 +480,7 @@ The MCP twin of `ask update` (§1.8.1): corrects `title` and/or `body` in place,
 
 - `title` replaces the title (same validation and trimming as `--title`).
 - `body` replaces the body; an explicit empty string clears it, an omitted field leaves it alone.
-- `body_append` appends after a blank line, as `--body-append`. The body that results is bounded as well as the piece appended: an append that would take the body past 16384 characters is a validation error (code 2) and writes nothing, so repeated appends cannot grow an item without limit. The message is `ask update: body_append would grow body past 16384 characters (body is <n> now, would be <m>)`.
+- `body_append` appends after a blank line, as `--body-append`. The cap applies to the piece appended, not to the body that results: a `body_append` of up to 16384 characters is accepted whatever the length of the stored body, including a body the CLI already grew past 16384 (§1.1). Only the argument is refused, with `ask update: body_append exceeds 16384 characters (got <n>)`.
 - `body` and `body_append` together are a validation error (code 2), as is a call naming none of the three.
 - `--body-file` / `--body-append-file` have no twin: an MCP caller already holds the text.
 

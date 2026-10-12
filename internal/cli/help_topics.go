@@ -227,7 +227,8 @@ Tools
   ask_new
     Args:
       title       (required) string, 1..200 chars
-      body        string, 0..16384 chars
+      body        string, 0..16384 chars (an MCP limit; the CLI
+                  applies no body cap)
       urgency     "blocker" | "normal" | "fyi"   (default "normal")
       filed_by    string, <=256 chars
       recipient   string, 1..1024 chars, non-whitespace; opaque
@@ -364,7 +365,9 @@ Item object (.ask/items/ask-XXXX.json)
                                        created_at, up to 1024 retries.
   title                string          1..200 chars after trim, no
                                        newlines. Required.
-  body                 string          0..16384 chars. Default "".
+  body                 string          Default "". No cap through the
+                                       CLI; <=16384 chars per MCP
+                                       argument.
   urgency              string          blocker | normal | fyi. Default
                                        normal. ask itself does nothing
                                        with urgency beyond storing it;
@@ -443,7 +446,8 @@ Item object (.ask/items/ask-XXXX.json)
   resolution_note      string | null   Set by resolve --note or by close
                                        --reason from open/resolved.
                                        Preserved across subsequent
-                                       transitions. <=16384.
+                                       transitions. <=16384 per MCP
+                                       argument.
   verification_output  string | null   Verifier output captured by
                                        reopen --reason. Cleared on
                                        resolve. <=65536, truncated with

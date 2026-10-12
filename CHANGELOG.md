@@ -96,8 +96,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `label` / `url` each carried a `maxLength` that nothing checked, so a caller that ignored
   the schema could file or grow an item of any size. An over-length value is now a
   validation error (code 2) naming the field and the limit, and nothing is written.
-  `ask_update` also bounds the body a `body_append` would produce, so repeated appends
-  cannot grow an item without limit. The CLI is unchanged.
+  Each limit applies to the argument a call sends, not to what is stored. The CLI is
+  unchanged: it applies no cap to `body` or the other free-text fields, on purpose, because
+  an ask refused at filing time is lost (spec 1.1 now says so instead of reading as a hard
+  limit).
 - The MCP server now enforces the rest of what its tool schemas advertise, by checking each
   call against the schema itself: `links` is capped at 32 entries, a link's `label` and
   `url` are required and non-empty, `verifier.timeout_seconds` must be 1..3600 when given,
@@ -124,6 +126,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A verifier filed without a timeout is stored with `timeout_seconds` 60, as the spec has
   always said; `ask new --verifier` and the MCP `ask_new` both stored 0. Items already on
   disk with 0 still load and are reported as 60 by `ask show`, `ask list` and the MCP tools.
+- The title limit is 200 characters, not 200 bytes. `ask new`, `ask update --title` and the
+  MCP `ask_new` / `ask_update` tools counted bytes, so a 200-character title in a non-ASCII
+  script was refused with `title must be 1..200 characters`. All four now count Unicode code
+  points, through the one validator in `internal/core`; `ask new` no longer carries its own
+  copy of the title rules.
+- An MCP `body_append` to an item whose body is already past 16384 characters now succeeds.
+  The CLI files bodies of any length, and `ask_update` refused every append to such an item
+  with `body_append would grow body past 16384 characters`, leaving it uneditable over MCP.
+  The cap is on the `body_append` argument (still 16384 characters), not on the body that
+  results.
 
 ## [0.2.1]
 
