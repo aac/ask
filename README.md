@@ -204,7 +204,7 @@ are git operations the user explicitly invokes.
 
 `ask` is released as an installable plugin (current version 0.2.1) and is in daily use across a
 range of projects. The CLI, MCP server, skill, and install path are all in place; install with
-`/plugin marketplace add aac/ask` then `/plugin install ask@ask` (see Install above for Codex
+`/plugin marketplace add aac/ask` then `/plugin install ask@ask` (see Installing above for Codex
 and the bare binary). Codesigning and notarization of the macOS binary are still to come.
 
 Design & internals: [`docs/spec.md`](docs/spec.md) is the authoritative implementation
