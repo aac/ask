@@ -474,6 +474,8 @@ Verifier object
                             in v1.
   timeout_seconds  integer  1..3600. Default 60 when a verifier is
                             supplied without an explicit timeout.
+                            Items filed by older versions may hold
+                            0 on disk; ask reports those as 60.
                             Advisory; ask does not enforce.
 
 Link object

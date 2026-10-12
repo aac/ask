@@ -121,6 +121,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--body-file -` / `--body-append-file -` (and any future `-`-valued flag) now parse
   correctly when the flag precedes the id; the flag reorderer treated a bare `-` as the
   start of another flag and swallowed the id as the flag's value.
+- A verifier filed without a timeout is stored with `timeout_seconds` 60, as the spec has
+  always said; `ask new --verifier` and the MCP `ask_new` both stored 0. Items already on
+  disk with 0 still load and are reported as 60 by `ask show`, `ask list` and the MCP tools.
 
 ## [0.2.1]
 
