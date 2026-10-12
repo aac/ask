@@ -15,7 +15,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `.ask/subs/<id>.json`; `ask show` lists them, `ask harvest` carries them with their item,
   and the Item schema, `ask show --json` and the MCP tools are unchanged. `subscribe` exits 8
   when the item is already resolved and the subscription names `resolve` (stored anyway),
-  6 for an identical subscription, 2 for a closed item. Nothing runs a handler yet.
+  6 for an identical subscription, 2 for a closed item.
+- A status change runs the handlers subscribed to it: `resolve` for open to resolved, `close`
+  for anything to closed, `reopen` for resolved to open, through the CLI and the MCP tools
+  alike. The command that changed the item does not wait: it records the fire and starts a
+  detached runner, which runs the handler from the project root with a built environment
+  (`PATH=/usr/bin:/bin:<ask's directory>:$HOME/.local/bin`, `HOME`, `LANG`, `ASK_ID`,
+  `ASK_EVENT`, `ASK_SUB_ID`, `ASK_FIRE_ID`, `ASK_FROM_STATUS`, `ASK_TO_STATUS`, `ASK_AT`,
+  `ASK_STORE`, and `ASK_ARG_<KEY>` per argument; nothing inherited) and one JSON object on
+  stdin (`item`, `event`, `from`, `to`, `at`, `args`). A handler has 60 seconds, after which
+  it and everything it started are killed. Each fire leaves two lines in
+  `.ask/fires/<id>.jsonl`, a `started` line and a result line whose state is `ok`, `failed`,
+  `not_run`, `spawn_failed` or `timeout`, with the exit code and the last 4096 bytes of
+  output. A failing handler never fails or changes the write and is never retried; exit
+  codes, stdout and the MCP envelopes of `resolve`, `close` and `reopen` are unchanged.
 - `ask version` distinguishes builds. Without an `-ldflags` stamp it now prints
   `dev+<commit>[.dirty] <commit time>` from the build info Go embeds in every build from a
   checkout, instead of the bare `dev` — so a stale install is visible from the binary itself.
