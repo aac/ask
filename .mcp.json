@@ -1,8 +1,0 @@
-{
-  "mcpServers": {
-    "ask": {
-      "command": "${CLAUDE_PLUGIN_ROOT}/bin/ask",
-      "args": ["mcp"]
-    }
-  }
-}
