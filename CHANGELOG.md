@@ -30,6 +30,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   repair and adopts the existing items.
 
 ### Changed
+- `make release-local` no longer builds `windows/amd64`. The store lock is unix-only, and
+  Windows was already outside the platforms ask ships for.
 - The skill's filing rules now carry a **has-agent-arm check**: before filing, state why no
   agent in reach can take the action. "I can't do this from here" is not "no agent can do
   this" — another machine may hold the credential, the tool, or the network path — and a body
@@ -37,6 +39,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a human's inbox.
 
 ### Fixed
+- Two writers of one item can no longer overwrite each other. `resolve`, `reopen`, `close`
+  and `update` (and the MCP `ask_resolve` / `ask_reopen` / `ask_close` tools) loaded an item,
+  changed it and saved it with nothing held in between, so of two simultaneous
+  `update --body-append` calls one note was silently lost, and two simultaneous `resolve`
+  calls could both report the transition as theirs. Writers now hold one advisory lock per
+  store (`flock` on `.ask/.lock`) across the whole load, change, save, through a single
+  write path shared by the CLI and the MCP server; `harvest` holds both stores' locks. A
+  writer that cannot take the lock within 10 s exits 5 with
+  `store is locked by another ask process (waited 10s); nothing was written`. Reads take no
+  lock. Each atomic write also uses its own temp file name, where every writer of one item
+  used to share `<item>.json.tmp`. `ask new` is unchanged: two processes filing at the same
+  instant can still collide on an id.
 - A failed read no longer mutates the filesystem. `OpenStore` created `.ask/items/` before
   checking for `config.json`, so `ask list` in a directory with no store created a
   store-shaped husk there and *then* errored. Those husks are indistinguishable from real

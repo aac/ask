@@ -1,6 +1,8 @@
 package core
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,9 +14,10 @@ import (
 
 // FileStore is the on-disk JSON store at <root>/.ask/. Each item lives in
 // its own file under .ask/items/<id>.json. All mutations (config and item
-// writes) go through atomicWrite: write to <target>.tmp then os.Rename,
-// which is atomic for same-volume renames on every supported platform
-// (spec §8).
+// writes) go through atomicWrite: write to a uniquely named temp file
+// beside the target, then os.Rename, which is atomic for same-volume
+// renames (spec §8). Writers of an existing item also hold the store lock
+// (see Mutate).
 type FileStore struct {
 	root   string // absolute path to the .ask/ directory (not the project root).
 	config *ProjectConfig
@@ -289,12 +292,27 @@ func urgencyRank(u Urgency) int {
 	}
 }
 
-// atomicWrite writes data to path via <path>.tmp + os.Rename. The .tmp
-// file is in the same directory as path so the rename is same-volume and
-// atomic on every supported platform (spec §8).
+// atomicWrite writes data to path by writing a temp file beside it and
+// renaming that over path. The temp file is in the same directory so the
+// rename is same-volume and atomic (spec §8). Its name is unique per write
+// (<path>.<random>.tmp), so two writers of one path never share a temp
+// file; it still ends in .tmp, which is what isItemFile skips.
 func atomicWrite(path string, data []byte) error {
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+	var suffix [8]byte
+	if _, err := rand.Read(suffix[:]); err != nil {
+		return fmt.Errorf("temp name for %s: %w", path, err)
+	}
+	tmp := path + "." + hex.EncodeToString(suffix[:]) + ".tmp"
+	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	if err != nil {
+		return fmt.Errorf("write %s: %w", tmp, err)
+	}
+	_, err = f.Write(data)
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		_ = os.Remove(tmp)
 		return fmt.Errorf("write %s: %w", tmp, err)
 	}
 	if err := os.Rename(tmp, path); err != nil {

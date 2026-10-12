@@ -15,7 +15,8 @@ fmt:
 tidy:
 	go mod tidy
 
-# release-local builds the same 5-target matrix as the release workflow
+# release-local builds the 4-target unix matrix (darwin and linux; the store
+# lock is unix-only)
 # into ./dist for manual smoke-testing without cutting a tag.
 # Override VERSION=v0.0.0-local on the command line to embed a custom string.
 VERSION ?= v0.0.0-local
@@ -24,7 +25,7 @@ release-local:
 	@rm -rf dist
 	@mkdir -p dist
 	@set -e; \
-	for spec in darwin:amd64: darwin:arm64: linux:amd64: linux:arm64: windows:amd64:.exe; do \
+	for spec in darwin:amd64: darwin:arm64: linux:amd64: linux:arm64:; do \
 	  goos=$$(echo "$$spec" | cut -d: -f1); \
 	  goarch=$$(echo "$$spec" | cut -d: -f2); \
 	  ext=$$(echo "$$spec" | cut -d: -f3); \

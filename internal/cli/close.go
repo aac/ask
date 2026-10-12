@@ -26,7 +26,7 @@ func runClose(args []string) int {
 			"ask close <id> [flags]",
 			"Close an item. From resolved this is \"verified, done\"; from open this cancels/dismisses.")
 	}
-	return mutate("close", fs.Args(), *asJSON, func(it *core.Item) error {
-		return core.Close(it, *reason, time.Now().UTC())
+	return mutate("close", fs.Args(), *asJSON, func(it *core.Item, now time.Time) error {
+		return core.Close(it, *reason, now)
 	})
 }

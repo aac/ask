@@ -31,8 +31,8 @@ func runResolve(args []string) int {
 			"ask resolve <id> [flags]",
 			"Mark an item resolved (open → resolved). Typically called after a human completes the request.")
 	}
-	return mutate("resolve", fs.Args(), *asJSON, func(it *core.Item) error {
-		return core.Resolve(it, *note, time.Now().UTC())
+	return mutate("resolve", fs.Args(), *asJSON, func(it *core.Item, now time.Time) error {
+		return core.Resolve(it, *note, now)
 	})
 }
 
@@ -75,18 +75,18 @@ func reorderFlagsFirst(args []string) []string {
 	return append(flags, positional...)
 }
 
-// mutate is the shared helper for resolve/reopen/close. It (1) requires a
-// single id arg, (2) opens the on-disk store, (3) resolves the id prefix to
-// a full id, (4) loads the item, (5) runs fn (the transition), (6) saves,
-// (7) emits the success shape on stdout (id+arrow, or full Item when
-// asJSON). When the transition was a no-op (it.Status unchanged), it
-// instead writes a stderr warning per spec §1.8 + §2 and returns exit 6;
-// stdout still emits the success shape so scripts piping stdout keep
-// working.
+// mutate is the shared helper for resolve/reopen/close. It requires a
+// single id arg, opens the on-disk store, and hands the transition to
+// core.Mutate, which resolves the id prefix, loads the item, runs fn and
+// saves, all under the store lock. It then emits the success shape on
+// stdout (id+arrow, or full Item when asJSON). When the transition was a
+// no-op (the item already in the target state), it instead writes a stderr
+// warning per spec §1.8 + §2 and returns exit 6; stdout still emits the
+// success shape so scripts piping stdout keep working.
 //
 // Exit codes per spec §2: 0 success, 2 validation, 3 not-found, 4
-// ambiguous, 5 I/O, 6 idempotent no-op.
-func mutate(verb string, args []string, asJSON bool, fn func(*core.Item) error) int {
+// ambiguous, 5 I/O (including a store-lock timeout), 6 idempotent no-op.
+func mutate(verb string, args []string, asJSON bool, fn func(*core.Item, time.Time) error) int {
 	if len(args) < 1 {
 		fmt.Fprintf(os.Stderr, "ask %s: id required\n", verb)
 		return 2
@@ -95,60 +95,40 @@ func mutate(verb string, args []string, asJSON bool, fn func(*core.Item) error) 
 	if code != 0 {
 		return code
 	}
-	ids, err := store.ListIDs()
+	ch, err := store.Mutate(args[0], time.Now().UTC(), fn)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "ask %s: %v\n", verb, err)
-		return 5
+		return mutateErrExit(err)
 	}
-	full, err := core.ResolvePrefix(args[0], ids)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "ask %s: %v\n", verb, err)
-		switch {
-		case errors.Is(err, core.ErrIDNotFound):
-			return 3
-		case errors.Is(err, core.ErrIDAmbiguous):
-			return 4
-		}
-		return 5
-	}
-	it, err := store.Load(full)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "ask %s: %v\n", verb, err)
-		if errors.Is(err, core.ErrIDNotFound) {
-			return 3
-		}
-		return 5
-	}
-	prev := it.Status
-	if err := fn(it); err != nil {
-		fmt.Fprintf(os.Stderr, "ask %s: %v\n", verb, err)
-		return 2
-	}
-	// Detect idempotent no-op: the core transitions return nil and leave
-	// it.Status unchanged when the item is already in the target state
-	// (resolve→resolved, reopen→open, close→closed). We never re-Save in
-	// the no-op path: nothing changed, and skipping the write avoids
-	// touching the file mtime for a non-mutation.
-	noop := it.Status == prev
-	if !noop {
-		if err := store.Save(it); err != nil {
-			fmt.Fprintf(os.Stderr, "ask %s: %v\n", verb, err)
-			return 5
-		}
-	}
-
-	if noop {
+	it := ch.Item
+	if !ch.Changed {
 		fmt.Fprintf(os.Stderr, "ask %s: already %s\n", verb, it.Status)
 	}
 	if asJSON {
 		emitJSON(it)
-	} else if noop {
+	} else if !ch.Changed {
 		fmt.Printf("%s: already %s\n", it.ID, it.Status)
 	} else {
-		fmt.Printf("%s: %s -> %s\n", it.ID, prev, it.Status)
+		fmt.Printf("%s: %s -> %s\n", it.ID, ch.From, it.Status)
 	}
-	if noop {
+	if !ch.Changed {
 		return 6
 	}
 	return 0
+}
+
+// mutateErrExit maps a core.Mutate failure to its spec §2 exit code: 2 when
+// the change was refused, 3 / 4 when the id did not resolve, 5 for I/O and
+// for a store-lock timeout.
+func mutateErrExit(err error) int {
+	var refused *core.RefusedError
+	switch {
+	case errors.As(err, &refused):
+		return 2
+	case errors.Is(err, core.ErrIDNotFound):
+		return 3
+	case errors.Is(err, core.ErrIDAmbiguous):
+		return 4
+	}
+	return 5
 }

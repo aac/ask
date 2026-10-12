@@ -40,9 +40,19 @@ type HarvestResult struct {
 //     first, then all deletes) so a copy failure never leaves a source
 //     item deleted without a corresponding target copy.
 //
+// Both stores' locks are held for the whole operation, taken in path order
+// (spec §8), so no other writer changes either store between the pre-flight
+// and the last copy or delete.
+//
 // Returns the (sorted) list of ids harvested in HarvestResult.Harvested.
 // An empty source returns an empty list with no error.
 func Harvest(target, source *FileStore, clean bool) (*HarvestResult, error) {
+	unlock, err := lockStores(target, source)
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
+
 	srcIDs, err := source.ListIDs()
 	if err != nil {
 		return nil, fmt.Errorf("list source items: %w", err)

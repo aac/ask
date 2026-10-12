@@ -486,36 +486,37 @@ func callShow(repoRoot string, raw json.RawMessage) (string, bool) {
 }
 
 func callResolve(repoRoot string, raw json.RawMessage) ([]toolContent, bool) {
-	return mutate(repoRoot, "resolve", raw, func(args idArgs, it *core.Item) error {
-		return core.Resolve(it, args.Note, time.Now().UTC())
+	return mutate(repoRoot, "resolve", raw, func(args idArgs, it *core.Item, now time.Time) error {
+		return core.Resolve(it, args.Note, now)
 	})
 }
 
 func callReopen(repoRoot string, raw json.RawMessage) ([]toolContent, bool) {
-	return mutate(repoRoot, "reopen", raw, func(args idArgs, it *core.Item) error {
-		return core.Reopen(it, args.Reason, time.Now().UTC())
+	return mutate(repoRoot, "reopen", raw, func(args idArgs, it *core.Item, now time.Time) error {
+		return core.Reopen(it, args.Reason, now)
 	})
 }
 
 func callClose(repoRoot string, raw json.RawMessage) ([]toolContent, bool) {
-	return mutate(repoRoot, "close", raw, func(args idArgs, it *core.Item) error {
-		return core.Close(it, args.Reason, time.Now().UTC())
+	return mutate(repoRoot, "close", raw, func(args idArgs, it *core.Item, now time.Time) error {
+		return core.Close(it, args.Reason, now)
 	})
 }
 
 // mutate is the shared lifecycle helper for ask_resolve / ask_reopen /
-// ask_close. It mirrors the CLI's internal/cli.mutate: on a real state
-// change it persists the item and returns a single text part with the
-// post-transition Item JSON; on an idempotent no-op (the target status
-// already matched, so core.Resolve / Reopen / Close returned nil
-// without mutating the item) it skips the re-save and returns two text
-// parts — the unchanged Item JSON followed by a warning string
+// ask_close. It mirrors the CLI's internal/cli.mutate and calls the same
+// core.Mutate, so the load, transition and save run under the store lock
+// here too. On a real state change it returns a single text part with the
+// post-transition Item JSON; on an idempotent no-op (the item already in
+// the target status, so nothing was written) it returns two text parts —
+// the unchanged Item JSON followed by a warning string
 // `ask <verb>: already <status>`. isError stays false for the no-op
 // path because the call succeeded; see spec §5.5.
 //
-// On any error (validation, not-found, ambiguous, I/O), returns a
-// single content part with the encoded errEnvelope and isError=true.
-func mutate(repoRoot, verb string, raw json.RawMessage, fn func(idArgs, *core.Item) error) ([]toolContent, bool) {
+// On any error (validation, not-found, ambiguous, I/O, store-lock
+// timeout), returns a single content part with the encoded errEnvelope
+// and isError=true.
+func mutate(repoRoot, verb string, raw json.RawMessage, fn func(idArgs, *core.Item, time.Time) error) ([]toolContent, bool) {
 	var args idArgs
 	if err := json.Unmarshal(raw, &args); err != nil {
 		return textContent(encodeErr(2, fmt.Sprintf("ask %s: %s", verb, err.Error()))), true
@@ -523,38 +524,31 @@ func mutate(repoRoot, verb string, raw json.RawMessage, fn func(idArgs, *core.It
 	if strings.TrimSpace(args.ID) == "" {
 		return textContent(encodeErr(2, fmt.Sprintf("ask %s: id required", verb))), true
 	}
-	store, full, code, msg, ok := resolveID(repoRoot, verb, args.ID)
-	if !ok {
-		return textContent(encodeErr(code, msg)), true
-	}
-	it, err := store.Load(full)
+	store, err := core.OpenStore(repoRoot, nil)
 	if err != nil {
-		if errors.Is(err, core.ErrIDNotFound) {
-			return textContent(encodeErr(3, fmt.Sprintf("ask %s: id %q not found", verb, full))), true
+		return textContent(encodeErr(storeErrCode(err), fmt.Sprintf("ask %s: %s", verb, err.Error()))), true
+	}
+	ch, err := store.Mutate(args.ID, time.Now().UTC(), func(it *core.Item, now time.Time) error {
+		return fn(args, it, now)
+	})
+	if err != nil {
+		var refused *core.RefusedError
+		switch {
+		case errors.As(err, &refused):
+			return textContent(encodeErr(2, fmt.Sprintf("ask %s: %s", verb, err.Error()))), true
+		case errors.Is(err, core.ErrIDAmbiguous):
+			return textContent(encodeErr(4, fmt.Sprintf("ask %s: %s", verb, err.Error()))), true
+		case errors.Is(err, core.ErrIDNotFound):
+			return textContent(encodeErr(3, fmt.Sprintf("ask %s: id %q not found", verb, args.ID))), true
 		}
 		return textContent(encodeErr(5, fmt.Sprintf("ask %s: %s", verb, err.Error()))), true
 	}
-	prev := it.Status
-	if err := fn(args, it); err != nil {
-		return textContent(encodeErr(2, fmt.Sprintf("ask %s: %s", verb, err.Error()))), true
-	}
-	// Detect idempotent no-op the same way internal/cli.mutate does
-	// (post-call status comparison): core.Resolve/Reopen/Close return
-	// nil and leave it.Status unchanged when the item is already in
-	// the target state. We never re-Save on no-op — nothing changed,
-	// and skipping the write avoids touching the file mtime for a
-	// non-mutation.
-	noop := it.Status == prev
-	if !noop {
-		if err := store.Save(it); err != nil {
-			return textContent(encodeErr(5, fmt.Sprintf("ask %s: %s", verb, err.Error()))), true
-		}
-	}
+	it := ch.Item
 	body, isErr := encodeJSON(it)
 	if isErr {
 		return textContent(body), true
 	}
-	if noop {
+	if !ch.Changed {
 		// Spec §5.5: idempotent no-op surfaces as isError=false with
 		// the item payload plus a second text content part carrying
 		// the same warning string the CLI writes to stderr.

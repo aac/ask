@@ -5,12 +5,12 @@
 package cli
 
 import (
-	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/aac/ask/internal/core"
 )
@@ -108,55 +108,35 @@ func runUpdate(args []string) int {
 	if code != 0 {
 		return code
 	}
-	ids, err := store.ListIDs()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "ask update: %v\n", err)
-		return 5
-	}
-	full, err := core.ResolvePrefix(fs.Arg(0), ids)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "ask update: %v\n", err)
+	// The edit itself runs inside core.Mutate, under the store lock, so an
+	// append lands on the body as it is on disk at that moment rather than
+	// on a copy another writer may since have replaced.
+	ch, err := store.Mutate(fs.Arg(0), time.Now().UTC(), func(it *core.Item, _ time.Time) error {
+		if set["title"] {
+			it.Title = strings.TrimSpace(*title)
+		}
 		switch {
-		case errors.Is(err, core.ErrIDNotFound):
-			return 3
-		case errors.Is(err, core.ErrIDAmbiguous):
-			return 4
+		case set["body"], set["body-file"]:
+			it.Body = newBody
+		case set["body-append"], set["body-append-file"]:
+			it.Body = appendBodyText(it.Body, appendBody)
 		}
-		return 5
-	}
-	it, err := store.Load(full)
+		return nil
+	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "ask update: %v\n", err)
-		if errors.Is(err, core.ErrIDNotFound) {
-			return 3
-		}
-		return 5
+		return mutateErrExit(err)
 	}
-
-	prevTitle, prevBody := it.Title, it.Body
-	if set["title"] {
-		it.Title = strings.TrimSpace(*title)
-	}
-	switch {
-	case set["body"], set["body-file"]:
-		it.Body = newBody
-	case set["body-append"], set["body-append-file"]:
-		it.Body = appendBodyText(it.Body, appendBody)
-	}
+	it := ch.Item
 
 	// No-op envelope (spec §1.8 + §2): the item already reads exactly as
-	// requested. Skip the write so a non-mutation doesn't touch mtime, and
-	// return 6 so scripts that care can branch; stdout still emits the
-	// success shape.
-	if it.Title == prevTitle && it.Body == prevBody {
+	// requested. Nothing was written, so a non-mutation doesn't touch
+	// mtime; return 6 so scripts that care can branch. Stdout still emits
+	// the success shape.
+	if !ch.Changed {
 		fmt.Fprintf(os.Stderr, "ask update: %s already reads as requested\n", it.ID)
 		emitUpdated(it, *asJSON, "unchanged")
 		return 6
-	}
-
-	if err := store.Save(it); err != nil {
-		fmt.Fprintf(os.Stderr, "ask update: %v\n", err)
-		return 5
 	}
 	emitUpdated(it, *asJSON, "updated")
 	return 0
