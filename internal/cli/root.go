@@ -8,20 +8,22 @@ import (
 type commandFunc func(args []string) int
 
 var commands = map[string]commandFunc{
-	"init":    runInit,
-	"new":     runNew,
-	"list":    runList,
-	"show":    runShow,
-	"update":  runUpdate,
-	"resolve": runResolve,
-	"reopen":  runReopen,
-	"close":   runClose,
-	"harvest": runHarvest,
-	"mcp":     runMCP,
-	"help":    runHelp,
-	"version": runVersion,
-	"-h":      runHelp,
-	"--help":  runHelp,
+	"init":        runInit,
+	"new":         runNew,
+	"list":        runList,
+	"show":        runShow,
+	"update":      runUpdate,
+	"subscribe":   runSubscribe,
+	"unsubscribe": runUnsubscribe,
+	"resolve":     runResolve,
+	"reopen":      runReopen,
+	"close":       runClose,
+	"harvest":     runHarvest,
+	"mcp":         runMCP,
+	"help":        runHelp,
+	"version":     runVersion,
+	"-h":          runHelp,
+	"--help":      runHelp,
 }
 
 // Run dispatches the top-level subcommand. Returns the exit code per the

@@ -63,9 +63,12 @@ type HarvestResult struct {
 //     for (ErrIDMismatch): the preflight above compared file names, so a
 //     file claiming another id would otherwise be written wherever its
 //     contents say (act-7ee74d).
-//   - Copy pass: each loaded item is Save'd to target.
+//     Each item's subscriptions (.ask/subs/<id>.json) are read in the same
+//     pass; an unreadable subs file fails the harvest the same way.
+//   - Copy pass: each loaded item is Save'd to target, then its
+//     subscriptions, if it has any.
 //   - Optional cleanup: when clean is true, after every copy succeeds the
-//     source files are removed — by the id each file was listed under,
+//     source files (item and subscriptions) are removed — by the id each file was listed under,
 //     never by an id read out of its contents. The two passes are ordered (all writes
 //     first, then all deletes) so a copy failure never leaves a source
 //     item deleted without a corresponding target copy.
@@ -112,6 +115,7 @@ func Harvest(target, source *FileStore, clean bool) (*HarvestResult, error) {
 	// rather than leaving the items that sorted ahead of it copied
 	// (act-f80d7a). Every unreadable id is reported, not just the first.
 	items := make([]*Item, 0, len(srcIDs))
+	subs := make([]*SubsFile, 0, len(srcIDs))
 	var unreadable unreadableItems
 	for _, id := range srcIDs {
 		it, err := source.Load(id)
@@ -119,7 +123,13 @@ func Harvest(target, source *FileStore, clean bool) (*HarvestResult, error) {
 			unreadable = append(unreadable, fmt.Errorf("%s: %w", id, err))
 			continue
 		}
+		f, err := source.LoadSubs(id)
+		if err != nil {
+			unreadable = append(unreadable, fmt.Errorf("%s: %w", id, err))
+			continue
+		}
 		items = append(items, it)
+		subs = append(subs, f)
 	}
 	if len(unreadable) > 0 {
 		return nil, fmt.Errorf("%w (%d), nothing copied: %w",
@@ -133,6 +143,11 @@ func Harvest(target, source *FileStore, clean bool) (*HarvestResult, error) {
 		if err := target.Save(it); err != nil {
 			return nil, fmt.Errorf("write target %s: %w", srcIDs[i], err)
 		}
+		if len(subs[i].Subscriptions) > 0 {
+			if err := target.saveSubs(subs[i]); err != nil {
+				return nil, fmt.Errorf("write target subscriptions %s: %w", srcIDs[i], err)
+			}
+		}
 	}
 	harvested := append([]string{}, srcIDs...)
 
@@ -144,6 +159,13 @@ func Harvest(target, source *FileStore, clean bool) (*HarvestResult, error) {
 			}
 			if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 				return nil, fmt.Errorf("cleanup source %s: %w", id, err)
+			}
+			subsPath, err := source.subsPath(id)
+			if err != nil {
+				return nil, fmt.Errorf("cleanup source: %w", err)
+			}
+			if err := os.Remove(subsPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+				return nil, fmt.Errorf("cleanup source subscriptions %s: %w", id, err)
 			}
 		}
 	}

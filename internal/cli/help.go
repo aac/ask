@@ -15,6 +15,8 @@ Commands:
   list           List items in this project.
   show           Show one item's full detail.
   update         Correct an item's title or body (no state change).
+  subscribe      Run a handler when an item is resolved, closed or reopened.
+  unsubscribe    Remove one of an item's subscriptions.
   resolve        Mark an item resolved (typically called by an agent).
   reopen         Reopen a resolved item (verifier failed).
   close          Close an item (final, or cancel/dismiss from open).
