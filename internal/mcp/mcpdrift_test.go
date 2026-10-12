@@ -432,32 +432,37 @@ func TestMaxLengthCountsCharactersNotBytes(t *testing.T) {
 	mcpdriftSameStore(t, root, before)
 }
 
-// TestBodyAppendBoundsResultingBody: each append is within the per-call
-// cap, but the body it would produce is bounded too, so an item cannot
-// be grown without limit one small append at a time.
-func TestBodyAppendBoundsResultingBody(t *testing.T) {
+// TestBodyAppendCapsTheArgumentNotTheResult: each body_append is capped
+// at 16384 characters, but the body it produces is not (act-58c1b4). The
+// caps are limits on what one call may send; the CLI files bodies of any
+// length, so a stored body may be longer and appends to it must land.
+func TestBodyAppendCapsTheArgumentNotTheResult(t *testing.T) {
 	root := t.TempDir()
 	initRepo(t, root)
 	// An append costs the two-character blank-line separator plus the
-	// text: 16381 + 2 + 1 lands exactly on the limit.
+	// text: 16381 + 2 + 1 lands exactly on 16384.
 	it := mcpupdNew(t, root, "seed", strings.Repeat("x", 16381), 1)
 
 	tr := mcpdriftCall(t, root, "ask_update", map[string]any{"id": it.ID, "body_append": "y"})
 	if tr.IsError {
-		t.Fatalf("append landing exactly on the limit was refused: %.200s", tr.Content[0].Text)
+		t.Fatalf("append landing exactly on 16384 was refused: %.200s", tr.Content[0].Text)
 	}
 	if got := mcpupdShow(t, root, it.ID, 2).Body; len(got) != 16384 {
-		t.Fatalf("body length after at-limit append: got %d want 16384", len(got))
+		t.Fatalf("body length after append: got %d want 16384", len(got))
 	}
 
-	before := mcpdriftSnapshot(t, root)
+	// One more takes the stored body past 16384, and is accepted.
 	tr = mcpdriftCall(t, root, "ask_update", map[string]any{"id": it.ID, "body_append": "z"})
+	if tr.IsError {
+		t.Fatalf("append taking the stored body past 16384 was refused: %.200s", tr.Content[0].Text)
+	}
+	if got := mcpupdShow(t, root, it.ID, 3).Body; len(got) != 16387 {
+		t.Fatalf("body length after second append: got %d want 16387", len(got))
+	}
+
+	// A body replacement is an argument, so it is still capped.
+	before := mcpdriftSnapshot(t, root)
+	tr = mcpdriftCall(t, root, "ask_update", map[string]any{"id": it.ID, "body": strings.Repeat("x", 16385)})
 	mcpdriftWantTooLong(t, tr, "body", 16384)
 	mcpdriftSameStore(t, root, before)
-
-	// A title-only correction of an item whose body is at the limit is
-	// still allowed: the bound applies to body edits.
-	if tr := mcpdriftCall(t, root, "ask_update", map[string]any{"id": it.ID, "title": "renamed"}); tr.IsError {
-		t.Fatalf("title-only update of an at-limit item was refused: %.200s", tr.Content[0].Text)
-	}
 }

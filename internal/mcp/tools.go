@@ -51,10 +51,11 @@ const maxRecipientRefLen = 1024
 // advertised and what is enforced cannot drift apart.
 //
 // maxTextLen bounds the free-text fields: body, body_append, and the
-// resolve/reopen/close note and reason (spec §1.1). ask_update also
-// applies it to the body that RESULTS from a body_append, so repeated
-// appends cannot grow an item without limit. The CLI enforces none of
-// these today; they are MCP-boundary limits.
+// resolve/reopen/close note and reason (spec §1.1). Each cap limits the
+// ARGUMENT one call sends, never the stored result: the CLI applies none
+// of the free-text caps (an ask refused at filing time is an ask lost),
+// so a stored body can already be longer, and a within-limit body_append
+// to it is accepted.
 const (
 	maxTextLen            = 16384
 	maxFiledByLen         = 256
@@ -786,18 +787,10 @@ func callUpdate(repoRoot string, raw json.RawMessage) ([]toolContent, bool) {
 		return textContent(encodeErr(2, msg)), true
 	}
 	ch, errBody := lockedChange(repoRoot, "update", args.ID, func(it *core.Item, _ time.Time) error {
-		if args.BodyAppend != nil {
-			// Bound the body the append would produce, not just the piece
-			// appended: otherwise an item grows without limit one in-bounds
-			// append at a time. Checked on the same join Apply performs,
-			// against the body as it is on disk under the lock.
-			joined := core.AppendBody(it.Body, *args.BodyAppend)
-			if _, bad := tooLong("update", "body", joined, maxTextLen); bad {
-				return fmt.Errorf(
-					"body_append would grow body past %d characters (body is %d now, would be %d)",
-					maxTextLen, utf8.RuneCountInString(it.Body), utf8.RuneCountInString(joined))
-			}
-		}
+		// No bound on the body that results: the caps limit what one
+		// call may send, not what is stored. The CLI files bodies of any
+		// length (spec §1.1), so the stored body may already be past
+		// maxTextLen, and a within-limit append to it must still land.
 		upd.Apply(it)
 		return nil
 	})
