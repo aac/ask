@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 )
@@ -19,6 +20,40 @@ var ErrIDCollision = errors.New("id collisions in target")
 // error). The message names every such id with its reason; neither store
 // is mutated when this error fires.
 var ErrUnreadableSource = errors.New("unreadable source item(s)")
+
+// ErrStrayTarget is returned by Harvest when the target's items directory
+// holds an entry whose name matches a source item's file name
+// (`<id>.json`) case-insensitively without being exactly that name:
+// ASK-AAAB.json against ask-aaab. On a case-insensitive filesystem the
+// copy would be written into that entry and keep its name, so the
+// harvested ask would be unreadable in the target (act-f9ab23). The
+// message names each such file; neither store is mutated.
+var ErrStrayTarget = errors.New("target file differs from a source item's only in case")
+
+// strayTargetTwins returns one "<file> (source <id>)" entry for every name
+// in target's items directory that a source id's file name matches under
+// case folding but not exactly. It compares names and never probes the
+// filesystem, so the answer is the same whether or not the filesystem
+// folds case. Directories count: a name is in the way whatever it names.
+func strayTargetTwins(target *FileStore, srcIDs []string) ([]string, error) {
+	entries, err := os.ReadDir(filepath.Join(target.root, itemsSubdir))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read target items dir: %w", err)
+	}
+	var twins []string
+	for _, e := range entries {
+		for _, id := range srcIDs {
+			if want := id + ".json"; e.Name() != want && strings.EqualFold(e.Name(), want) {
+				twins = append(twins, fmt.Sprintf("%s (source %s)", e.Name(), id))
+			}
+		}
+	}
+	sort.Strings(twins)
+	return twins, nil
+}
 
 // unreadableItems is the per-item failure list behind ErrUnreadableSource:
 // one line of text for the human, while Unwrap keeps each cause (e.g.
@@ -56,6 +91,9 @@ type HarvestResult struct {
 //     ErrIDCollision wrapping the colliding ids. Neither store is touched.
 //     When the validation pass below also fails, the one error carries
 //     both (it is ErrIDCollision and ErrUnreadableSource).
+//     A target file whose name differs from a source item's only in case
+//     is refused the same way (ErrStrayTarget, naming the file), and is
+//     reported together with either of the other two.
 //   - Validation pass: every source item is Load'd via the canonical
 //     schema before anything is written. If any is unreadable, returns
 //     ErrUnreadableSource naming every unreadable id; neither store is
@@ -108,6 +146,10 @@ func Harvest(target, source *FileStore, clean bool) (*HarvestResult, error) {
 			collisions = append(collisions, id)
 		}
 	}
+	twins, err := strayTargetTwins(target, srcIDs)
+	if err != nil {
+		return nil, err
+	}
 	// A collision does not return yet: the validation pass below still
 	// runs, so one refused harvest names every problem in the source
 	// instead of the collision alone (act-16ad85).
@@ -133,15 +175,26 @@ func Harvest(target, source *FileStore, clean bool) (*HarvestResult, error) {
 		items = append(items, it)
 		subs = append(subs, f)
 	}
+	var refusal error
 	switch {
 	case len(collisions) > 0 && len(unreadable) > 0:
-		return nil, fmt.Errorf("%w: %v; %w (%d), nothing copied: %w",
+		refusal = fmt.Errorf("%w: %v; %w (%d), nothing copied: %w",
 			ErrIDCollision, collisions, ErrUnreadableSource, len(unreadable), unreadable)
 	case len(collisions) > 0:
-		return nil, fmt.Errorf("%w: %v", ErrIDCollision, collisions)
+		refusal = fmt.Errorf("%w: %v", ErrIDCollision, collisions)
 	case len(unreadable) > 0:
-		return nil, fmt.Errorf("%w (%d), nothing copied: %w",
+		refusal = fmt.Errorf("%w (%d), nothing copied: %w",
 			ErrUnreadableSource, len(unreadable), unreadable)
+	}
+	if len(twins) > 0 {
+		stray := fmt.Errorf("%w, nothing copied: %s", ErrStrayTarget, strings.Join(twins, ", "))
+		if refusal != nil {
+			return nil, fmt.Errorf("%w; %w", stray, refusal)
+		}
+		return nil, stray
+	}
+	if refusal != nil {
+		return nil, refusal
 	}
 
 	// items[i] was loaded from the file listed as srcIDs[i] (no id was

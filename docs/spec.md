@@ -105,6 +105,16 @@ Rules:
   the source. It never skips an unreadable item. When the same run also
   has an id collision with the target, the one message names both the
   colliding ids and every unreadable id.
+  The same refusal covers the target side of a case clash: if the
+  target's `items/` holds an entry whose name matches a source item's
+  file name (`<id>.json`) case-insensitively without being exactly that
+  name (`ASK-AAAB.json`, `ask-aaab.JSON` against `ask-aaab`), `harvest`
+  exits 5 naming the file and the source id, copying and removing
+  nothing. On a case-insensitive filesystem the copy would otherwise be
+  written into that entry and keep its name, leaving the harvested ask
+  unreadable. The check compares names and does not probe the
+  filesystem, so the store is refused on a case-sensitive one too. It is
+  reported in the same message as a collision or unreadable items.
 - **Write path refusal:** `core.FileStore.Save` refuses to write an Item
   whose `schema_version` is anything other than `"1"`, so no code path
   can produce or overwrite a non-v1 item file.
@@ -582,7 +592,7 @@ Item files (`.ask/items/ask-XXXX.json`) follow the same policy individually: a c
 The details of that rule, for `ask list` and `ask_list` alike:
 
 - **Unreadable** means the file cannot be loaded as a v1 item: it is not valid JSON, it carries a `schema_version` other than `"1"` (§1.1.1), its `id` field is not the file's own name stem, or the file itself cannot be read. Listing never rewrites, moves or deletes such a file.
-- **The `id` field must equal the filename stem** (`ask-3c89.json` holds `"id": "ask-3c89"`). A mismatch makes the item unreadable under its filename id, with a reason naming both ids: the file name, not the file's contents, says which item a file is, so `harvest` (which refuses the whole run, §1.1.1) can neither write to nor `--clean` a path taken from an item's contents. Independently, the store refuses to build a path from any id that does not match the §1.1 pattern `^ask-[0-9a-f]{4}$` exactly (lowercase only, so two ids can never name one file on a case-insensitive filesystem): such an id cannot be loaded, saved or cleaned, a stray file so named in `items/` is an unreadable item, and `harvest` refuses the whole run naming every one.
+- **The `id` field must equal the filename stem** (`ask-3c89.json` holds `"id": "ask-3c89"`). A mismatch makes the item unreadable under its filename id, with a reason naming both ids: the file name, not the file's contents, says which item a file is, so `harvest` (which refuses the whole run, §1.1.1) can neither write to nor `--clean` a path taken from an item's contents. Independently, the store refuses to build a path from any id that does not match the §1.1 pattern `^ask-[0-9a-f]{4}$` exactly (lowercase only, so two ids can never name one file on a case-insensitive filesystem): such an id cannot be loaded, saved or cleaned, a stray file so named in `items/` is an unreadable item, and `harvest` refuses the whole run naming every one. A stray on the target side whose name differs from a source item's file name only in case is refused too (§1.1.1).
 - **The warning** is one stderr line per skipped id, in id order: `ask list: skipped <id>: <reason>`, where `<reason>` is the same reason `ask show <id>` reports for that item. Warnings go to stderr only; stdout is exactly the list, so `ask list --json` stays a valid JSON array (§1.4) holding the readable items.
 - **Readability is judged before the filters run.** An unreadable file's status, urgency, `blocks` and `recipient` are unknown, so it cannot be matched against `--status` and the rest; it is always reported as skipped, whatever filters were given. The exit is `0` whenever at least one item file was readable — even if the filters then exclude every readable item, which lists nothing (`[]` under `--json`).
 - **Exit 5** is reserved for a store where item files exist and none of them is readable. The per-id warnings are followed by `ask list: no readable items (<n> unreadable)` and stdout is empty — not `[]`, which would read as an empty inbox.

@@ -78,6 +78,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   case-sensitive filesystem. Every verb now resolves to the real item; a prefix that matches
   only the stray exits 5 with a message naming the file. `ask harvest` now names an id
   collision and unreadable source items in one refusal instead of the collision alone.
+- `ask harvest` no longer overwrites a stray file in the target store. With a hand-placed
+  `ASK-AAAB.json` in the target and `ask-aaab` in the source, on a case-insensitive
+  filesystem (the macOS default) harvest exited 0, wrote the ask into the stray file and left
+  it named `ASK-AAAB.json`, so `ask list` skipped it; with `--clean` the ask was also gone
+  from the source. Harvest now exits 5 naming the file, copying and removing nothing,
+  whenever a name in the target's `items/` differs from a source item's file name only in
+  case. It compares names, so the refusal is the same on a case-sensitive filesystem.
 - Two writers of one item can no longer overwrite each other. `resolve`, `reopen`, `close`
   and `update` (and the MCP `ask_resolve` / `ask_reopen` / `ask_close` / `ask_update` tools) loaded an
   item,

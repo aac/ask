@@ -36,8 +36,9 @@ type harvestJSONOutput struct {
 //
 //	0  copy succeeded (including the empty-source case)
 //	2  validation error: --from missing, or source == target
-//	5  I/O error, store-uninitialized, id collision in target, or an
-//	   unreadable source item (nothing is copied; every such id is named)
+//	5  I/O error, store-uninitialized, id collision in target, a target
+//	   file differing from a source item's only in case, or an unreadable
+//	   source item (nothing is copied; every such id or file is named)
 //
 // Idempotent-no-op exit 6 is not used here: an empty source is a real
 // success, not a "already in target state" claim. Re-running after
