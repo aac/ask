@@ -295,8 +295,9 @@ Error envelope
                     "text":"{\"code\":3,\"message\":\"ask-9999: not found\"}" }],
       "isError": true }
   code is one of the CLI exit codes a tool call can fail with:
-    2  validation error (bad or over-length argument, unknown tool,
-       refused transition)
+    2  validation error (an argument that breaks the tool's
+       inputSchema, including one the schema does not declare;
+       unknown tool; refused transition)
     3  id not found
     4  ambiguous id prefix
     5  I/O error, or no .ask/ here (run ask init)
@@ -311,7 +312,9 @@ Example transcript
        "params":{ "protocolVersion":"2024-11-05" } }
   <- { "jsonrpc":"2.0", "id":1,
        "result":{ "protocolVersion":"2024-11-05",
-                  "serverInfo":{"name":"ask-mcp","version":"0.1.0"} } }
+                  "serverInfo":{"name":"ask-mcp","version":"<version>"} } }
+  (<version> is this build's version string, the one "ask version"
+  prints.)
 
   -> { "jsonrpc":"2.0", "id":2, "method":"tools/call",
        "params":{ "name":"ask_new",

@@ -59,6 +59,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   validation error (code 2) naming the field and the limit, and nothing is written.
   `ask_update` also bounds the body a `body_append` would produce, so repeated appends
   cannot grow an item without limit. The CLI is unchanged.
+- The MCP server now enforces the rest of what its tool schemas advertise, by checking each
+  call against the schema itself: `links` is capped at 32 entries, a link's `label` and
+  `url` are required and non-empty, `verifier.timeout_seconds` must be 1..3600 when given,
+  and an argument the schema does not declare is refused (every tool advertises
+  `additionalProperties: false`), including inside `verifier` and a link. All of these were
+  accepted and written before. Also now refused, as the schemas always said: an explicit
+  empty string for `recipient`, `urgency` or `verifier.type` on `ask_new`, and for the
+  `blocks` / `recipient` filters on `ask_list` — omit the argument instead. Each is a
+  validation error (code 2) naming the argument and the bound, and nothing is written.
+- `ask help mcp`'s example transcript no longer shows a fixed `0.1.0` as the server
+  version; `serverInfo.version` is the build's version string.
 - `docs/spec.md` and `ask help mcp` now match the MCP wire: a successful result omits
   `isError` (absent means false), and the error codes a tool call can return are 2, 3, 4,
   5 and 7 — never 6, since an idempotent no-op is a success.

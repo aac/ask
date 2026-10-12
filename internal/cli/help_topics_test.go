@@ -35,3 +35,15 @@ func TestEveryTopicHasContent(t *testing.T) {
 		}
 	}
 }
+
+// TestMCPTopicShowsNoFixedVersion: serverInfo.version is the build's
+// version string, so the example transcript must not print a literal
+// number that goes stale at the next release.
+func TestMCPTopicShowsNoFixedVersion(t *testing.T) {
+	if !strings.Contains(mcpTopic, `"version":"<version>"`) {
+		t.Error(`mcp topic's serverInfo example should read "version":"<version>"`)
+	}
+	if strings.Contains(mcpTopic, `"version":"0.`) || strings.Contains(mcpTopic, `"version":"1.`) {
+		t.Error("mcp topic's serverInfo example carries a literal version number")
+	}
+}
