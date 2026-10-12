@@ -169,6 +169,13 @@ func Harvest(target, source *FileStore, clean bool) (*HarvestResult, error) {
 	var unreadable unreadableItems
 	var subbed []string // readable source ids that have subscriptions
 	for _, id := range srcIDs {
+		if checkID(id) != nil {
+			// A stray: its name is not an id, so the report names the
+			// file, in the words List and ResolvePrefix use (act-5f279f).
+			unreadable = append(unreadable, fmt.Errorf(
+				"%w: stray file in .ask/items/ not named for an id: %s.json", ErrInvalidID, id))
+			continue
+		}
 		it, err := source.Load(id)
 		if err != nil {
 			unreadable = append(unreadable, fmt.Errorf("%s: %w", id, err))
