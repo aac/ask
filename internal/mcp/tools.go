@@ -241,9 +241,9 @@ func tools() []toolDescriptor {
 
 // newArgs mirrors the ask_new inputSchema. urgency defaults to "normal"
 // when absent (matching the CLI's flag default). The verifier sub-object
-// matches the core.Verifier shape one-to-one; timeout_seconds is required
-// in the spec table (§1.2) but the CLI's `--timeout` defaults to 0, so we
-// don't enforce a default here.
+// matches the core.Verifier shape one-to-one; an omitted (or null)
+// timeout_seconds decodes as 0 and is stored as the §1.2 default, 60 — an
+// explicit 0 never gets this far, the schema's minimum of 1 refuses it.
 type newArgs struct {
 	Title      string        `json:"title"`
 	Body       string        `json:"body"`
@@ -396,7 +396,7 @@ func callNew(repoRoot string, raw json.RawMessage) (string, bool) {
 		item.Verifier = &core.Verifier{
 			Type:           core.VerifierShell,
 			Command:        args.Verifier.Command,
-			TimeoutSeconds: args.Verifier.TimeoutSeconds,
+			TimeoutSeconds: core.VerifierTimeoutOrDefault(args.Verifier.TimeoutSeconds),
 		}
 	}
 	if err := store.Save(item); err != nil {

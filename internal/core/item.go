@@ -59,6 +59,23 @@ type Verifier struct {
 	TimeoutSeconds int          `json:"timeout_seconds"`
 }
 
+// DefaultVerifierTimeoutSeconds is the timeout_seconds a verifier carries
+// when its filer gave none (docs/spec.md §1.2).
+const DefaultVerifierTimeoutSeconds = 60
+
+// VerifierTimeoutOrDefault maps "no timeout given" (0) to
+// DefaultVerifierTimeoutSeconds and returns any other value unchanged.
+// Both creation paths (`ask new`, ask_new) store its result, and the read
+// path applies it too: item files written before the default was applied
+// at creation hold 0, and ask runs no verifier itself (§9), so the read is
+// where whoever does run one learns the timeout to use.
+func VerifierTimeoutOrDefault(seconds int) int {
+	if seconds == 0 {
+		return DefaultVerifierTimeoutSeconds
+	}
+	return seconds
+}
+
 // Link is a labeled URL attached to an item (e.g. a console link).
 type Link struct {
 	Label string `json:"label"`
@@ -205,6 +222,12 @@ func (i *Item) UnmarshalJSON(b []byte) error {
 	}
 	if r.Blocks == nil {
 		r.Blocks = []string{}
+	}
+	// A stored timeout of 0 is an item filed without one before `ask new`
+	// applied the default; read it as the default (spec §1.2). The file is
+	// not rewritten by the read. Other values are returned as stored.
+	if r.Verifier != nil {
+		r.Verifier.TimeoutSeconds = VerifierTimeoutOrDefault(r.Verifier.TimeoutSeconds)
 	}
 	*i = Item(r)
 	return nil

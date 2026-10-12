@@ -20,7 +20,7 @@ func runNew(args []string) int {
 	body := fs.String("body", "", "Detailed body")
 	urgency := fs.String("urgency", "normal", "blocker|normal|fyi")
 	verifier := fs.String("verifier", "", "Shell command to verify resolution")
-	timeout := fs.Int("timeout", 0, "Verifier timeout in seconds (advisory)")
+	timeout := fs.Int("timeout", 0, "Verifier timeout in seconds (advisory; default 60)")
 	tracker := fs.String("tracker-ref", "", "Backward provenance: the tracker item that motivated this ask (e.g. act-3c89); metadata only, no queue effect. Use --blocks for a blocking relationship")
 	filedBy := fs.String("filed-by", "", "Free-form filer id")
 	recipient := fs.String("recipient", "", "Free-form recipient ref (e.g. agent:data-prep, human:andrew, team:reviewers)")
@@ -122,7 +122,7 @@ func runNew(args []string) int {
 		item.Verifier = &core.Verifier{
 			Type:           core.VerifierShell,
 			Command:        *verifier,
-			TimeoutSeconds: *timeout,
+			TimeoutSeconds: core.VerifierTimeoutOrDefault(*timeout),
 		}
 	}
 	if len(blocks) > 0 {
