@@ -108,19 +108,23 @@ func runUpdate(args []string) int {
 	if code != 0 {
 		return code
 	}
-	// The edit itself runs inside core.Mutate, under the store lock, so an
-	// append lands on the body as it is on disk at that moment rather than
-	// on a copy another writer may since have replaced.
+	// The edit itself is core.TextUpdate, shared with the ask_update MCP
+	// tool so the two surfaces cannot drift. It runs inside core.Mutate,
+	// under the store lock, so an append lands on the body as it is on disk
+	// at that moment rather than on a copy another writer has since
+	// replaced.
+	upd := core.TextUpdate{}
+	if set["title"] {
+		upd.Title = title
+	}
+	switch {
+	case set["body"], set["body-file"]:
+		upd.Body = &newBody
+	case set["body-append"], set["body-append-file"]:
+		upd.BodyAppend = &appendBody
+	}
 	ch, err := store.Mutate(fs.Arg(0), time.Now().UTC(), func(it *core.Item, _ time.Time) error {
-		if set["title"] {
-			it.Title = strings.TrimSpace(*title)
-		}
-		switch {
-		case set["body"], set["body-file"]:
-			it.Body = newBody
-		case set["body-append"], set["body-append-file"]:
-			it.Body = appendBodyText(it.Body, appendBody)
-		}
+		upd.Apply(it)
 		return nil
 	})
 	if err != nil {
@@ -152,16 +156,6 @@ func emitUpdated(it *core.Item, asJSON bool, state string) {
 	fmt.Printf("%s: %s\n", it.ID, state)
 }
 
-// appendBodyText joins an existing body and an appended note with a blank
-// line, per `act update --description-append`. An empty existing body
-// yields the addition alone rather than a leading blank line.
-func appendBodyText(existing, addition string) string {
-	if strings.TrimSpace(existing) == "" {
-		return addition
-	}
-	return strings.TrimRight(existing, "\n") + "\n\n" + addition
-}
-
 // readTextSource reads path as UTF-8 text, treating "-" as stdin. Mirrors
 // `act update --description-file`.
 func readTextSource(path string) (string, error) {
@@ -179,20 +173,9 @@ func readTextSource(path string) (string, error) {
 	return string(b), nil
 }
 
-// validateTitle enforces the spec §1.1 title rules shared by `ask new` and
-// `ask update`: non-empty after trim, 1..200 characters, no newlines.
-// Returns (errorMessage, false) on the first failure; the message is
-// shaped to be wrapped with the verb prefix at the caller.
+// validateTitle is the spec §1.1 title check shared by `ask new` and
+// `ask update`. The rules live in core so the ask_update MCP tool applies
+// the same ones.
 func validateTitle(title string) (string, bool) {
-	t := strings.TrimSpace(title)
-	if t == "" {
-		return "title must not be empty", false
-	}
-	if len(t) > 200 {
-		return "title must be 1..200 characters", false
-	}
-	if strings.ContainsAny(t, "\n\r") {
-		return "title must not contain newlines", false
-	}
-	return "", true
+	return core.ValidateTitle(title)
 }

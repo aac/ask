@@ -77,3 +77,55 @@ func TestMCPResolveLockTimeout(t *testing.T) {
 		t.Fatalf("status %s after unlock, want resolved", it.Status)
 	}
 }
+
+// TestMCPUpdateLockTimeout is the same check for ask_update, the other MCP
+// tool that rewrites an existing item.
+func TestMCPUpdateLockTimeout(t *testing.T) {
+	root := t.TempDir()
+	initRepo(t, root)
+	created := newItem(t, root, 1)
+	path := filepath.Join(root, ".ask", "items", created.ID+".json")
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	orig := core.LockTimeout
+	core.LockTimeout = 100 * time.Millisecond
+	t.Cleanup(func() { core.LockTimeout = orig })
+	store, err := core.OpenStore(root, nil)
+	if err != nil {
+		t.Fatalf("OpenStore: %v", err)
+	}
+	held, err := store.Lock()
+	if err != nil {
+		t.Fatalf("take lock: %v", err)
+	}
+	defer held.Unlock()
+
+	tr := extractToolResult(t, driveRequest(t, root, map[string]any{
+		"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+		"params": map[string]any{
+			"name":      "ask_update",
+			"arguments": map[string]any{"id": created.ID, "body_append": "a note"},
+		},
+	}))
+	if !tr.IsError || len(tr.Content) != 1 {
+		t.Fatalf("ask_update with the lock held: isError=%v content %+v", tr.IsError, tr.Content)
+	}
+	var env errEnvelope
+	if err := json.Unmarshal([]byte(tr.Content[0].Text), &env); err != nil {
+		t.Fatalf("decode error envelope: %v\nbody: %s", err, tr.Content[0].Text)
+	}
+	want := "ask update: store is locked by another ask process (waited 100ms); nothing was written"
+	if env.Code != 5 || env.Message != want {
+		t.Fatalf("envelope: code %d message %q\nwant code 5 message %q", env.Code, env.Message, want)
+	}
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Fatalf("item file changed under a timed-out ask_update")
+	}
+}

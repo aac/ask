@@ -182,6 +182,13 @@ func (s *FileStore) Save(item *Item) error {
 	if item.SchemaVersion == "" {
 		item.SchemaVersion = CurrentSchemaVersion
 	}
+	// Never write an item under a schema marker this binary does not
+	// implement (spec §1.1.1). Load already refuses such items, so this
+	// only fires for a struct-literal caller; it keeps "no write path can
+	// produce or overwrite a non-v1 item" true by construction.
+	if err := checkSchemaVersion(item.SchemaVersion); err != nil {
+		return fmt.Errorf("save item %s: %w", item.ID, err)
+	}
 	b, err := json.MarshalIndent(item, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal item %s: %w", item.ID, err)
@@ -198,7 +205,9 @@ func (s *FileStore) Save(item *Item) error {
 
 // Load reads a single item by its full id. Returns ErrIDNotFound if the
 // underlying file is missing (CLI maps to exit 3 per spec §4.3). A corrupt
-// item file returns a wrapped JSON error (CLI maps to exit 5 per spec §7).
+// item file returns a wrapped JSON error, and an item whose schema_version
+// is not CurrentSchemaVersion returns a wrapped ErrUnsupportedSchemaVersion
+// (CLI maps both to exit 5 per spec §1.1.1, §7).
 func (s *FileStore) Load(id string) (*Item, error) {
 	b, err := os.ReadFile(s.itemPath(id))
 	if errors.Is(err, os.ErrNotExist) {
@@ -209,6 +218,11 @@ func (s *FileStore) Load(id string) (*Item, error) {
 	}
 	var it Item
 	if err := json.Unmarshal(b, &it); err != nil {
+		// A well-formed item from a different schema is not "corrupt";
+		// say which it is so the reader repairs the right thing.
+		if errors.Is(err, ErrUnsupportedSchemaVersion) {
+			return nil, fmt.Errorf("item %s: %w", id, err)
+		}
 		return nil, fmt.Errorf("item %s corrupt: %w", id, err)
 	}
 	return &it, nil
@@ -241,7 +255,23 @@ func (s *FileStore) ListIDs() ([]string, error) {
 	return ids, nil
 }
 
-// List returns every item in the store, sorted per spec §3.2:
+// SkippedItem names one item file List could not read, and why. Err is the
+// error Load returned for that id: a JSON decode failure, a wrapped
+// ErrUnsupportedSchemaVersion, or an I/O error on the file itself.
+type SkippedItem struct {
+	ID  string
+	Err error
+}
+
+// String is the one wording for a skip, shared by the CLI's stderr warning
+// and the MCP warning part (each prefixes `ask list: `). The id is stated
+// explicitly rather than left to Err's own text, so the reader can always
+// find it in the same place.
+func (s SkippedItem) String() string {
+	return fmt.Sprintf("skipped %s: %v", s.ID, s.Err)
+}
+
+// List returns every readable item in the store, sorted per spec §3.2:
 //
 //  1. urgency descending — blocker (0) before normal (1) before fyi (2).
 //  2. created_at ascending (oldest first within a given urgency).
@@ -249,20 +279,38 @@ func (s *FileStore) ListIDs() ([]string, error) {
 //
 // This is the order both plain-text `ask list` and `ask list --json` use.
 // Filtering by status (default: hide closed) is the caller's responsibility;
-// List returns every item on disk.
-func (s *FileStore) List() ([]*Item, error) {
+// List returns every readable item on disk.
+//
+// An item file that cannot be read — corrupt JSON, or a schema_version
+// this binary does not implement (spec §1.1.1) — does not fail the call.
+// It is left out of the items and reported in skipped (sorted by id), so
+// one bad file cannot lock the whole inbox (spec §7.2). List does not
+// decide whether that is fatal: the caller applies the §7.2 rule (an
+// error only when something was skipped and nothing was readable) and
+// owes its reader a warning per skipped id. The returned error is
+// reserved for failing to enumerate the store at all.
+//
+// A file that disappears between the directory read and its Load is not
+// unreadable — it is gone, as if removed a moment earlier — and is
+// dropped without a skip entry.
+func (s *FileStore) List() (items []*Item, skipped []SkippedItem, err error) {
 	ids, err := s.ListIDs()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	out := make([]*Item, 0, len(ids))
 	for _, id := range ids {
 		it, err := s.Load(id)
+		if errors.Is(err, ErrIDNotFound) {
+			continue
+		}
 		if err != nil {
-			return nil, err
+			skipped = append(skipped, SkippedItem{ID: id, Err: err})
+			continue
 		}
 		out = append(out, it)
 	}
+	sort.Slice(skipped, func(i, j int) bool { return skipped[i].ID < skipped[j].ID })
 	sort.SliceStable(out, func(i, j int) bool {
 		ui, uj := urgencyRank(out[i].Urgency), urgencyRank(out[j].Urgency)
 		if ui != uj {
@@ -273,7 +321,7 @@ func (s *FileStore) List() ([]*Item, error) {
 		}
 		return out[i].ID < out[j].ID
 	})
-	return out, nil
+	return out, skipped, nil
 }
 
 // urgencyRank assigns the spec §3.2 ordering value to an urgency. Unknown

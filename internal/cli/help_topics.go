@@ -55,7 +55,10 @@ Cross-store move
                              so items filed there are invisible to the
                              main checkout until harvested. Pre-flight
                              checks refuse the call on id collision or
-                             when source==target; --clean removes source
+                             when source==target, and every source item
+                             is read before any is written, so an
+                             unreadable one (exit 5, each id named)
+                             copies nothing; --clean removes source
                              items after a successful copy so re-running
                              is a clean no-op.
 
@@ -204,7 +207,8 @@ const mcpTopic = `ask help mcp — MCP tools and an example transcript
 
 ask mcp starts a stdio JSON-RPC 2.0 server speaking MCP protocol
 2024-11-05. Server name: ask-mcp. The server exposes one tool per CLI
-verb except init (init is a developer action, not an agent action).
+verb an agent uses on an item (init and harvest are developer actions
+on the store, not agent actions, and stay CLI-only).
 Tool shapes mirror the CLI flags; semantics are identical in both
 directions.
 
@@ -257,6 +261,12 @@ Tools
     the "ask-" prefix.
     Returns: the Item object.
 
+  ask_update
+    Args: id (required), plus title and/or one of body (replace; an
+    empty string clears it) or body_append (add a note after a blank
+    line). Corrects the text in place; makes no state transition.
+    Returns: the updated Item object.
+
   ask_resolve
     Args: id (required), note (optional string).
     Returns: the post-transition Item object.
@@ -274,19 +284,26 @@ Tools
 
 Response envelope
   Every successful call returns:
-    { "content": [{ "type":"text", "text":"<json>" }],
-      "isError": false }
+    { "content": [{ "type":"text", "text":"<json>" }] }
   The text field is the same JSON the CLI emits with --json. Agents
-  JSON-parse the text.
+  JSON-parse the text. A successful result carries no isError key at
+  all; absent means false. isError appears, as true, only on errors.
 
 Error envelope
   On any non-success outcome:
     { "content": [{ "type":"text",
                     "text":"{\"code\":3,\"message\":\"ask-9999: not found\"}" }],
       "isError": true }
-  code mirrors the CLI exit-code taxonomy (2,3,4,5). Idempotent no-ops
-  (code 6) come back as isError:false with the item payload plus an
-  extra text element containing the warning — the call succeeded.
+  code is one of the CLI exit codes a tool call can fail with:
+    2  validation error (bad or over-length argument, unknown tool,
+       refused transition)
+    3  id not found
+    4  ambiguous id prefix
+    5  I/O error, or no .ask/ here (run ask init)
+    7  stranded store: item files present, config.json missing
+  code is never 6. An idempotent no-op (CLI exit 6) is a success: no
+  error envelope, no isError, the item payload plus an extra text
+  element containing the warning.
 
 Example transcript
 
@@ -306,16 +323,14 @@ Example transcript
                                  "timeout_seconds":60 } } } }
   <- { "jsonrpc":"2.0", "id":2,
        "result":{ "content":[{"type":"text",
-                              "text":"{\"id\":\"ask-3c89\",\"title\":\"Set up Gmail OAuth\",...}"}],
-                  "isError":false } }
+                              "text":"{\"id\":\"ask-3c89\",\"title\":\"Set up Gmail OAuth\",...}"}] } }
 
   -> { "jsonrpc":"2.0", "id":3, "method":"tools/call",
        "params":{ "name":"ask_list",
                   "arguments":{ "status":["open"], "urgency":["blocker"] } } }
   <- { "jsonrpc":"2.0", "id":3,
        "result":{ "content":[{"type":"text",
-                              "text":"[{\"id\":\"ask-3c89\",...}]"}],
-                  "isError":false } }
+                              "text":"[{\"id\":\"ask-3c89\",...}]"}] } }
 `
 
 const schemaTopic = `ask help schema — Item fields and project config

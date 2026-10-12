@@ -106,7 +106,7 @@ func TestStoreListSorted(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	got, err := s.List()
+	got, _, err := s.List()
 	if err != nil {
 		t.Fatal(err)
 	}

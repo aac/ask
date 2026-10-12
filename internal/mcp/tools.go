@@ -13,7 +13,12 @@
 //     open) → isError=false with two content parts: the unchanged Item
 //     payload, followed by a `ask <verb>: already <status>` warning
 //     string. This is the MCP analog of the CLI's exit-6 envelope
-//     (stderr warning + stdout success body); see spec §5.5.
+//     (stderr warning + stdout success body); see spec §5.5. ask_update
+//     uses the same envelope when the item already reads as requested;
+//     its warning is `ask update: <id> already reads as requested`.
+//   - ask_list over a store with unreadable item files → isError=false
+//     with the array of readable items plus one warning part per skipped
+//     id; code 5 only when no item at all was readable (spec §7.2).
 package mcp
 
 import (
@@ -22,6 +27,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/aac/ask/internal/core"
 )
@@ -37,6 +43,43 @@ const maxBlocksRefLen = 1024
 // duplicated to keep MCP independent of the CLI package.
 const maxRecipientRefLen = 1024
 
+// Length caps advertised as `maxLength` in the tool schemas below. A
+// schema is only a hint to the client — nothing on the wire stops a
+// caller from sending more — so every one of these is also enforced in
+// the handler (tooLong) before anything is written. The schemas read
+// these constants rather than repeating the numbers, so what is
+// advertised and what is enforced cannot drift apart.
+//
+// maxTextLen bounds the free-text fields: body, body_append, and the
+// resolve/reopen/close note and reason (spec §1.1). ask_update also
+// applies it to the body that RESULTS from a body_append, so repeated
+// appends cannot grow an item without limit. The CLI enforces none of
+// these today; they are MCP-boundary limits.
+const (
+	maxTextLen            = 16384
+	maxFiledByLen         = 256
+	maxTrackerRefLen      = 256
+	maxVerifierCommandLen = 4096
+	maxLinkLabelLen       = 120
+	maxLinkURLLen         = 2048
+)
+
+// tooLong reports whether s exceeds max characters and, if so, the
+// message to return (code 2), naming the field and the limit. Length is
+// counted in Unicode code points, which is what JSON Schema's maxLength
+// means, so a value a schema-validating client accepts is never refused
+// here.
+func tooLong(verb, field, s string, max int) (string, bool) {
+	if len(s) <= max {
+		// Byte length bounds the character count; skip the scan.
+		return "", false
+	}
+	if n := utf8.RuneCountInString(s); n > max {
+		return fmt.Sprintf("ask %s: %s exceeds %d characters (got %d)", verb, field, max, n), true
+	}
+	return "", false
+}
+
 // tools returns the static tool descriptors advertised by tools/list. Order
 // matches the CLI verb listing in internal/cli/root.go to make manual diffing
 // trivial.
@@ -51,18 +94,18 @@ func tools() []toolDescriptor {
 				"additionalProperties": false,
 				"properties": map[string]any{
 					"title":       map[string]any{"type": "string", "minLength": 1, "maxLength": 200},
-					"body":        map[string]any{"type": "string", "maxLength": 16384},
+					"body":        map[string]any{"type": "string", "maxLength": maxTextLen},
 					"urgency":     map[string]any{"type": "string", "enum": []string{"blocker", "normal", "fyi"}},
-					"filed_by":    map[string]any{"type": "string", "maxLength": 256},
+					"filed_by":    map[string]any{"type": "string", "maxLength": maxFiledByLen},
 					"recipient":   map[string]any{"type": "string", "minLength": 1, "maxLength": maxRecipientRefLen},
-					"tracker_ref": map[string]any{"type": "string", "maxLength": 256},
+					"tracker_ref": map[string]any{"type": "string", "maxLength": maxTrackerRefLen},
 					"verifier": map[string]any{
 						"type":                 "object",
 						"required":             []string{"command"},
 						"additionalProperties": false,
 						"properties": map[string]any{
 							"type":            map[string]any{"type": "string", "enum": []string{"shell"}},
-							"command":         map[string]any{"type": "string", "minLength": 1, "maxLength": 4096},
+							"command":         map[string]any{"type": "string", "minLength": 1, "maxLength": maxVerifierCommandLen},
 							"timeout_seconds": map[string]any{"type": "integer", "minimum": 1, "maximum": 3600},
 						},
 					},
@@ -74,8 +117,8 @@ func tools() []toolDescriptor {
 							"required":             []string{"label", "url"},
 							"additionalProperties": false,
 							"properties": map[string]any{
-								"label": map[string]any{"type": "string", "minLength": 1, "maxLength": 120},
-								"url":   map[string]any{"type": "string", "minLength": 1, "maxLength": 2048},
+								"label": map[string]any{"type": "string", "minLength": 1, "maxLength": maxLinkLabelLen},
+								"url":   map[string]any{"type": "string", "minLength": 1, "maxLength": maxLinkURLLen},
 							},
 						},
 					},
@@ -92,7 +135,7 @@ func tools() []toolDescriptor {
 		},
 		{
 			Name:        "ask_list",
-			Description: "List asks. Defaults to status != closed; pass `all: true` for every state (spec §3, §5.3).",
+			Description: "List asks. Defaults to status != closed; pass `all: true` for every state (spec §3, §5.3). An item file that cannot be read is skipped: the array of readable items is content[0], and each skipped id adds a text part `ask list: skipped <id>: <reason>`.",
 			InputSchema: map[string]any{
 				"type":                 "object",
 				"additionalProperties": false,
@@ -132,6 +175,21 @@ func tools() []toolDescriptor {
 			},
 		},
 		{
+			Name:        "ask_update",
+			Description: "Correct an ask's title or body in place. Makes no state transition: an open ask stays open. Give `title`, and/or one of `body` (replace; an empty string clears it) or `body_append` (add a note after a blank line). Returns the updated Item object (spec §1.8.1).",
+			InputSchema: map[string]any{
+				"type":                 "object",
+				"required":             []string{"id"},
+				"additionalProperties": false,
+				"properties": map[string]any{
+					"id":          map[string]any{"type": "string", "minLength": 1},
+					"title":       map[string]any{"type": "string", "minLength": 1, "maxLength": 200},
+					"body":        map[string]any{"type": "string", "maxLength": maxTextLen},
+					"body_append": map[string]any{"type": "string", "maxLength": maxTextLen},
+				},
+			},
+		},
+		{
 			Name:        "ask_resolve",
 			Description: "Transition an ask from open to resolved. Optional `note` populates resolution_note (spec §1.8).",
 			InputSchema: map[string]any{
@@ -140,7 +198,7 @@ func tools() []toolDescriptor {
 				"additionalProperties": false,
 				"properties": map[string]any{
 					"id":   map[string]any{"type": "string", "minLength": 1},
-					"note": map[string]any{"type": "string", "maxLength": 16384},
+					"note": map[string]any{"type": "string", "maxLength": maxTextLen},
 				},
 			},
 		},
@@ -153,7 +211,7 @@ func tools() []toolDescriptor {
 				"additionalProperties": false,
 				"properties": map[string]any{
 					"id":     map[string]any{"type": "string", "minLength": 1},
-					"reason": map[string]any{"type": "string", "maxLength": 16384},
+					"reason": map[string]any{"type": "string", "maxLength": maxTextLen},
 				},
 			},
 		},
@@ -166,7 +224,7 @@ func tools() []toolDescriptor {
 				"additionalProperties": false,
 				"properties": map[string]any{
 					"id":     map[string]any{"type": "string", "minLength": 1},
-					"reason": map[string]any{"type": "string", "maxLength": 16384},
+					"reason": map[string]any{"type": "string", "maxLength": maxTextLen},
 				},
 			},
 		},
@@ -204,14 +262,15 @@ func callNew(repoRoot string, raw json.RawMessage) (string, bool) {
 		return encodeErr(2, "ask new: "+err.Error()), true
 	}
 	title := strings.TrimSpace(args.Title)
+	// A missing title keeps ask_new's own wording ("is required": the
+	// field is mandatory here, where on ask_update it is optional and
+	// core.ValidateTitle's "must not be empty" fits). The remaining rules
+	// — length, newlines — are the shared ones.
 	if title == "" {
 		return encodeErr(2, "ask new: title is required"), true
 	}
-	if len(title) > 200 {
-		return encodeErr(2, "ask new: title must be 1..200 characters"), true
-	}
-	if strings.ContainsAny(title, "\n\r") {
-		return encodeErr(2, "ask new: title must not contain newlines"), true
+	if msg, ok := core.ValidateTitle(title); !ok {
+		return encodeErr(2, "ask new: "+msg), true
 	}
 	urgency := args.Urgency
 	if urgency == "" {
@@ -254,6 +313,30 @@ func callNew(repoRoot string, raw json.RawMessage) (string, bool) {
 		}
 		if len(args.Recipient) > maxRecipientRefLen {
 			return encodeErr(2, fmt.Sprintf("ask new: recipient: ref exceeds %d characters", maxRecipientRefLen)), true
+		}
+	}
+	// The remaining advertised maxLength caps (the title, blocks and
+	// recipient caps are checked above).
+	type capped struct {
+		field, value string
+		max          int
+	}
+	caps := []capped{
+		{"body", args.Body, maxTextLen},
+		{"filed_by", args.FiledBy, maxFiledByLen},
+		{"tracker_ref", args.TrackerRef, maxTrackerRefLen},
+	}
+	if args.Verifier != nil {
+		caps = append(caps, capped{"verifier.command", args.Verifier.Command, maxVerifierCommandLen})
+	}
+	for i, l := range args.Links {
+		caps = append(caps,
+			capped{fmt.Sprintf("links[%d].label", i), l.Label, maxLinkLabelLen},
+			capped{fmt.Sprintf("links[%d].url", i), l.URL, maxLinkURLLen})
+	}
+	for _, c := range caps {
+		if msg, bad := tooLong("new", c.field, c.value, c.max); bad {
+			return encodeErr(2, msg), true
 		}
 	}
 
@@ -319,23 +402,48 @@ type listArgs struct {
 	All       bool     `json:"all"`
 }
 
-func callList(repoRoot string, raw json.RawMessage) (string, bool) {
+// callList is the MCP twin of `ask list`. Unreadable item files follow
+// spec §7.2 the way the CLI does: they are skipped and the rest are
+// returned with isError=false, the array in content[0] and then one extra
+// text part per skipped id carrying the line the CLI writes to stderr
+// (`ask list: skipped <id>: <reason>`) — the §5.5 success-plus-warning
+// shape. When files were skipped and no item at all was readable, the
+// call is a code-5 error whose message names every skipped id.
+func callList(repoRoot string, raw json.RawMessage) ([]toolContent, bool) {
+	body, skipped, isErr := listBody(repoRoot, raw)
+	parts := textContent(body)
+	if isErr {
+		return parts, true
+	}
+	for _, sk := range skipped {
+		parts = append(parts, toolContent{Type: "text", Text: "ask list: " + sk.String()})
+	}
+	return parts, false
+}
+
+// listBody returns the JSON body for ask_list (the item array, or an
+// error envelope with isErr=true) and, on success, the item files that
+// were skipped as unreadable.
+func listBody(repoRoot string, raw json.RawMessage) (body string, skipped []core.SkippedItem, isErr bool) {
+	fail := func(code int, msg string) (string, []core.SkippedItem, bool) {
+		return encodeErr(code, msg), nil, true
+	}
 	var args listArgs
 	if err := json.Unmarshal(raw, &args); err != nil {
-		return encodeErr(2, "ask list: "+err.Error()), true
+		return fail(2, "ask list: "+err.Error())
 	}
 	// Spec §5.3: `all: true` + a status value is a validation error.
 	if args.All && len(args.Status) > 0 {
-		return encodeErr(2, "ask list: --all and --status are mutually exclusive"), true
+		return fail(2, "ask list: --all and --status are mutually exclusive")
 	}
 	for _, s := range args.Status {
 		if !core.Status(s).Valid() {
-			return encodeErr(2, fmt.Sprintf("ask list: invalid status %q (want one of open, resolved, closed)", s)), true
+			return fail(2, fmt.Sprintf("ask list: invalid status %q (want one of open, resolved, closed)", s))
 		}
 	}
 	for _, u := range args.Urgency {
 		if !core.Urgency(u).Valid() {
-			return encodeErr(2, fmt.Sprintf("ask list: invalid urgency %q (want one of blocker, normal, fyi)", u)), true
+			return fail(2, fmt.Sprintf("ask list: invalid urgency %q (want one of blocker, normal, fyi)", u))
 		}
 	}
 	// MCP `blocks` filter is a single string (mirrors the CLI's
@@ -343,10 +451,10 @@ func callList(repoRoot string, raw json.RawMessage) (string, bool) {
 	// from an orchestrator that knows the act id it's coordinating).
 	if args.Blocks != "" {
 		if strings.TrimSpace(args.Blocks) == "" {
-			return encodeErr(2, "ask list: blocks: ref must not be empty or whitespace-only"), true
+			return fail(2, "ask list: blocks: ref must not be empty or whitespace-only")
 		}
 		if len(args.Blocks) > maxBlocksRefLen {
-			return encodeErr(2, fmt.Sprintf("ask list: blocks: ref exceeds %d characters", maxBlocksRefLen)), true
+			return fail(2, fmt.Sprintf("ask list: blocks: ref exceeds %d characters", maxBlocksRefLen))
 		}
 	}
 	// MCP `recipient` filter is a single string (same convention as
@@ -354,19 +462,30 @@ func callList(repoRoot string, raw json.RawMessage) (string, bool) {
 	// within the per-ref cap.
 	if args.Recipient != "" {
 		if strings.TrimSpace(args.Recipient) == "" {
-			return encodeErr(2, "ask list: recipient: ref must not be empty or whitespace-only"), true
+			return fail(2, "ask list: recipient: ref must not be empty or whitespace-only")
 		}
 		if len(args.Recipient) > maxRecipientRefLen {
-			return encodeErr(2, fmt.Sprintf("ask list: recipient: ref exceeds %d characters", maxRecipientRefLen)), true
+			return fail(2, fmt.Sprintf("ask list: recipient: ref exceeds %d characters", maxRecipientRefLen))
 		}
 	}
 	store, err := core.OpenStore(repoRoot, nil)
 	if err != nil {
-		return encodeErr(storeErrCode(err), "ask list: "+err.Error()), true
+		return fail(storeErrCode(err), "ask list: "+err.Error())
 	}
-	items, err := store.List()
+	items, skipped, err := store.List()
 	if err != nil {
-		return encodeErr(5, "ask list: "+err.Error()), true
+		return fail(5, "ask list: "+err.Error())
+	}
+	if len(skipped) > 0 && len(items) == 0 {
+		// Spec §7.2: every item file was unreadable. Judged before the
+		// filters run, as in the CLI. There is no stderr here, so the
+		// one message carries every skipped id.
+		reasons := make([]string, len(skipped))
+		for i, sk := range skipped {
+			reasons[i] = sk.String()
+		}
+		return fail(5, fmt.Sprintf("ask list: no readable items (%d unreadable): %s",
+			len(skipped), strings.Join(reasons, "; ")))
 	}
 	filtered := make([]*core.Item, 0, len(items))
 	for _, it := range items {
@@ -388,7 +507,11 @@ func callList(repoRoot string, raw json.RawMessage) (string, bool) {
 	if filtered == nil {
 		filtered = []*core.Item{}
 	}
-	return encodeJSON(filtered)
+	body, isErr = encodeJSON(filtered)
+	if isErr {
+		return body, nil, true
+	}
+	return body, skipped, false
 }
 
 // statusMatches and urgencyMatches mirror the CLI helpers in
@@ -524,24 +647,17 @@ func mutate(repoRoot, verb string, raw json.RawMessage, fn func(idArgs, *core.It
 	if strings.TrimSpace(args.ID) == "" {
 		return textContent(encodeErr(2, fmt.Sprintf("ask %s: id required", verb))), true
 	}
-	store, err := core.OpenStore(repoRoot, nil)
-	if err != nil {
-		return textContent(encodeErr(storeErrCode(err), fmt.Sprintf("ask %s: %s", verb, err.Error()))), true
+	if msg, bad := tooLong(verb, "note", args.Note, maxTextLen); bad {
+		return textContent(encodeErr(2, msg)), true
 	}
-	ch, err := store.Mutate(args.ID, time.Now().UTC(), func(it *core.Item, now time.Time) error {
+	if msg, bad := tooLong(verb, "reason", args.Reason, maxTextLen); bad {
+		return textContent(encodeErr(2, msg)), true
+	}
+	ch, errBody := lockedChange(repoRoot, verb, args.ID, func(it *core.Item, now time.Time) error {
 		return fn(args, it, now)
 	})
-	if err != nil {
-		var refused *core.RefusedError
-		switch {
-		case errors.As(err, &refused):
-			return textContent(encodeErr(2, fmt.Sprintf("ask %s: %s", verb, err.Error()))), true
-		case errors.Is(err, core.ErrIDAmbiguous):
-			return textContent(encodeErr(4, fmt.Sprintf("ask %s: %s", verb, err.Error()))), true
-		case errors.Is(err, core.ErrIDNotFound):
-			return textContent(encodeErr(3, fmt.Sprintf("ask %s: id %q not found", verb, args.ID))), true
-		}
-		return textContent(encodeErr(5, fmt.Sprintf("ask %s: %s", verb, err.Error()))), true
+	if ch == nil {
+		return textContent(errBody), true
 	}
 	it := ch.Item
 	body, isErr := encodeJSON(it)
@@ -555,6 +671,117 @@ func mutate(repoRoot, verb string, raw json.RawMessage, fn func(idArgs, *core.It
 		return []toolContent{
 			{Type: "text", Text: body},
 			{Type: "text", Text: fmt.Sprintf("ask %s: already %s", verb, it.Status)},
+		}, false
+	}
+	return textContent(body), false
+}
+
+// lockedChange opens the store and runs fn through core.Mutate, the write
+// path the CLI also uses: id resolution, load, fn and save all happen
+// under the store lock. On failure it returns a nil Change and the encoded
+// errEnvelope for the caller to return as-is: code 2 when fn refused the
+// change, 3 / 4 when the id did not resolve, 7 for a stranded store, 5 for
+// I/O and for a store-lock timeout.
+func lockedChange(repoRoot, verb, id string, fn func(*core.Item, time.Time) error) (*core.Change, string) {
+	store, err := core.OpenStore(repoRoot, nil)
+	if err != nil {
+		return nil, encodeErr(storeErrCode(err), fmt.Sprintf("ask %s: %s", verb, err.Error()))
+	}
+	ch, err := store.Mutate(id, time.Now().UTC(), fn)
+	if err != nil {
+		var refused *core.RefusedError
+		switch {
+		case errors.As(err, &refused):
+			return nil, encodeErr(2, fmt.Sprintf("ask %s: %s", verb, err.Error()))
+		case errors.Is(err, core.ErrIDAmbiguous):
+			return nil, encodeErr(4, fmt.Sprintf("ask %s: %s", verb, err.Error()))
+		case errors.Is(err, core.ErrIDNotFound):
+			return nil, encodeErr(3, fmt.Sprintf("ask %s: id %q not found", verb, id))
+		}
+		return nil, encodeErr(5, fmt.Sprintf("ask %s: %s", verb, err.Error()))
+	}
+	return ch, ""
+}
+
+// ----- ask_update ------------------------------------------------------------
+
+// updateArgs mirrors the ask_update inputSchema. The text fields are
+// pointers so "absent" and "explicit empty string" stay distinct: an
+// omitted body must not blank the body, while `"body": ""` clears it —
+// the same distinction `ask update` draws with flag.Visit. The CLI's
+// --body-file / --body-append-file have no twin: an MCP caller already
+// holds the text.
+type updateArgs struct {
+	ID         string  `json:"id"`
+	Title      *string `json:"title"`
+	Body       *string `json:"body"`
+	BodyAppend *string `json:"body_append"`
+}
+
+// callUpdate is the MCP twin of `ask update` (spec §1.8.1): same
+// validation order, same messages, and the edit itself is the shared
+// core.TextUpdate. It makes no state transition. On the idempotent no-op
+// (the item already reads as requested) it skips the write and returns
+// the §5.5 two-part envelope — the unchanged Item plus the warning line
+// the CLI writes to stderr with exit 6.
+func callUpdate(repoRoot string, raw json.RawMessage) ([]toolContent, bool) {
+	var args updateArgs
+	if err := json.Unmarshal(raw, &args); err != nil {
+		return textContent(encodeErr(2, "ask update: "+err.Error())), true
+	}
+	if args.Body != nil && args.BodyAppend != nil {
+		return textContent(encodeErr(2, "ask update: body, body_append are mutually exclusive")), true
+	}
+	upd := core.TextUpdate{Title: args.Title, Body: args.Body, BodyAppend: args.BodyAppend}
+	if upd.Empty() {
+		return textContent(encodeErr(2, "ask update: nothing to update (want title, body, or body_append)")), true
+	}
+	if args.Title != nil {
+		if msg, ok := core.ValidateTitle(*args.Title); !ok {
+			return textContent(encodeErr(2, "ask update: "+msg)), true
+		}
+	}
+	if args.Body != nil {
+		if msg, bad := tooLong("update", "body", *args.Body, maxTextLen); bad {
+			return textContent(encodeErr(2, msg)), true
+		}
+	}
+	if args.BodyAppend != nil {
+		if msg, bad := tooLong("update", "body_append", *args.BodyAppend, maxTextLen); bad {
+			return textContent(encodeErr(2, msg)), true
+		}
+	}
+	if strings.TrimSpace(args.ID) == "" {
+		return textContent(encodeErr(2, "ask update: id required")), true
+	}
+	ch, errBody := lockedChange(repoRoot, "update", args.ID, func(it *core.Item, _ time.Time) error {
+		if args.BodyAppend != nil {
+			// Bound the body the append would produce, not just the piece
+			// appended: otherwise an item grows without limit one in-bounds
+			// append at a time. Checked on the same join Apply performs,
+			// against the body as it is on disk under the lock.
+			joined := core.AppendBody(it.Body, *args.BodyAppend)
+			if _, bad := tooLong("update", "body", joined, maxTextLen); bad {
+				return fmt.Errorf(
+					"body_append would grow body past %d characters (body is %d now, would be %d)",
+					maxTextLen, utf8.RuneCountInString(it.Body), utf8.RuneCountInString(joined))
+			}
+		}
+		upd.Apply(it)
+		return nil
+	})
+	if ch == nil {
+		return textContent(errBody), true
+	}
+	it, changed := ch.Item, ch.Changed
+	body, isErr := encodeJSON(it)
+	if isErr {
+		return textContent(body), true
+	}
+	if !changed {
+		return []toolContent{
+			{Type: "text", Text: body},
+			{Type: "text", Text: fmt.Sprintf("ask update: %s already reads as requested", it.ID)},
 		}, false
 	}
 	return textContent(body), false

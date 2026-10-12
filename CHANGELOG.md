@@ -40,7 +40,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - Two writers of one item can no longer overwrite each other. `resolve`, `reopen`, `close`
-  and `update` (and the MCP `ask_resolve` / `ask_reopen` / `ask_close` tools) loaded an item,
+  and `update` (and the MCP `ask_resolve` / `ask_reopen` / `ask_close` / `ask_update` tools) loaded an
+  item,
   changed it and saved it with nothing held in between, so of two simultaneous
   `update --body-append` calls one note was silently lost, and two simultaneous `resolve`
   calls could both report the transition as theirs. Writers now hold one advisory lock per
@@ -51,6 +52,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   lock. Each atomic write also uses its own temp file name, where every writer of one item
   used to share `<item>.json.tmp`. `ask new` is unchanged: two processes filing at the same
   instant can still collide on an id.
+- The MCP server now enforces the length limits its tool schemas advertise. `body`,
+  `body_append`, `note`, `reason`, `filed_by`, `tracker_ref`, `verifier.command` and link
+  `label` / `url` each carried a `maxLength` that nothing checked, so a caller that ignored
+  the schema could file or grow an item of any size. An over-length value is now a
+  validation error (code 2) naming the field and the limit, and nothing is written.
+  `ask_update` also bounds the body a `body_append` would produce, so repeated appends
+  cannot grow an item without limit. The CLI is unchanged.
+- `docs/spec.md` and `ask help mcp` now match the MCP wire: a successful result omits
+  `isError` (absent means false), and the error codes a tool call can return are 2, 3, 4,
+  5 and 7 — never 6, since an idempotent no-op is a success.
 - A failed read no longer mutates the filesystem. `OpenStore` created `.ask/items/` before
   checking for `config.json`, so `ask list` in a directory with no store created a
   store-shaped husk there and *then* errored. Those husks are indistinguishable from real

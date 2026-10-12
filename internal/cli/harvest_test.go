@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -221,5 +222,147 @@ func TestHarvestCLIEmptySourceJSONShape(t *testing.T) {
 	}
 	if !strings.Contains(out, `"harvested": []`) && !strings.Contains(out, `"harvested":[]`) {
 		t.Fatalf("expected harvested:[] in JSON output, got:\n%s", out)
+	}
+}
+
+// harvestatomicSnapshot returns filename → bytes for every entry in a
+// store's items directory (empty map when the directory is absent), so a
+// test can assert a store is byte-identical before and after a verb.
+func harvestatomicSnapshot(t *testing.T, root string) map[string]string {
+	t.Helper()
+	dir := filepath.Join(root, ".ask", "items")
+	entries, err := os.ReadDir(dir)
+	if os.IsNotExist(err) {
+		return map[string]string{}
+	}
+	if err != nil {
+		t.Fatalf("ReadDir %s: %v", dir, err)
+	}
+	snap := make(map[string]string, len(entries))
+	for _, e := range entries {
+		b, err := os.ReadFile(filepath.Join(dir, e.Name()))
+		if err != nil {
+			t.Fatalf("ReadFile %s: %v", e.Name(), err)
+		}
+		snap[e.Name()] = string(b)
+	}
+	return snap
+}
+
+// harvestatomicSameSnapshot fails the test when two snapshots differ in
+// file set or content.
+func harvestatomicSameSnapshot(t *testing.T, what string, before, after map[string]string) {
+	t.Helper()
+	if len(before) != len(after) {
+		t.Fatalf("%s changed: %d file(s) before, %d after (%v)", what, len(before), len(after), harvestatomicNames(after))
+	}
+	for name, b := range before {
+		a, ok := after[name]
+		if !ok {
+			t.Fatalf("%s: %s was removed", what, name)
+		}
+		if a != b {
+			t.Fatalf("%s: %s was rewritten", what, name)
+		}
+	}
+}
+
+func harvestatomicNames(snap map[string]string) []string {
+	names := make([]string, 0, len(snap))
+	for n := range snap {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// harvestatomicBreak makes one source item unreadable in the named way:
+// "corrupt" truncates it to invalid JSON; "schema" keeps it a valid item
+// but hand-sets schema_version to "2" (spec §1: unreadable to this binary).
+func harvestatomicBreak(t *testing.T, root, id, kind string) {
+	t.Helper()
+	path := filepath.Join(root, ".ask", "items", id+".json")
+	switch kind {
+	case "corrupt":
+		if err := os.WriteFile(path, []byte("{not json"), 0o644); err != nil {
+			t.Fatalf("corrupt %s: %v", id, err)
+		}
+	case "schema":
+		b, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %s: %v", id, err)
+		}
+		var raw map[string]any
+		if err := json.Unmarshal(b, &raw); err != nil {
+			t.Fatalf("decode %s: %v", id, err)
+		}
+		raw["schema_version"] = "2"
+		out, err := json.MarshalIndent(raw, "", "  ")
+		if err != nil {
+			t.Fatalf("encode %s: %v", id, err)
+		}
+		if err := os.WriteFile(path, out, 0o644); err != nil {
+			t.Fatalf("write %s: %v", id, err)
+		}
+	default:
+		t.Fatalf("unknown break kind %q", kind)
+	}
+}
+
+// TestHarvestCLIUnreadableSourceCopiesNothing pins act-f80d7a: when any
+// source item is unreadable, harvest fails with exit 5 having written
+// nothing to the target and removed nothing from the source — even with
+// --clean, and even for the readable items that sort before the bad one.
+// Two unreadable items (middle and last) check that every one is named,
+// not just the first hit.
+func TestHarvestCLIUnreadableSourceCopiesNothing(t *testing.T) {
+	for _, kind := range []string{"corrupt", "schema"} {
+		t.Run(kind, func(t *testing.T) {
+			mainDir := t.TempDir()
+			worktreeDir := t.TempDir()
+			base := time.Date(2026, 5, 15, 10, 0, 0, 0, time.UTC)
+			mk := func(id string) *core.Item {
+				return &core.Item{
+					ID: id, Title: "t-" + id,
+					Urgency: core.UrgencyNormal, Status: core.StatusOpen,
+					CreatedAt: base, Links: []core.Link{},
+				}
+			}
+			// The target already holds an unrelated item: "unchanged" must
+			// mean its existing contents survive too, not merely "empty".
+			harvestSeedAt(t, mainDir, "01HXMAIN0000000000000000A", mk("ask-0000"))
+			harvestSeedAt(t, worktreeDir, "01HXWORK0000000000000000B",
+				mk("ask-aaaa"), mk("ask-bbbb"), mk("ask-cccc"), mk("ask-dddd"))
+			harvestatomicBreak(t, worktreeDir, "ask-bbbb", kind)
+			harvestatomicBreak(t, worktreeDir, "ask-dddd", kind)
+			inDir(t, mainDir)
+
+			targetBefore := harvestatomicSnapshot(t, mainDir)
+			sourceBefore := harvestatomicSnapshot(t, worktreeDir)
+
+			var code int
+			var stdout string
+			stderr := captureStderr(t, func() {
+				stdout = captureStdout(t, func() {
+					code = Run([]string{"harvest", "--from", worktreeDir, "--clean"})
+				})
+			})
+			if code != 5 {
+				t.Fatalf("exit: got %d, want 5 (stderr=%q)", code, stderr)
+			}
+			harvestatomicSameSnapshot(t, "target", targetBefore, harvestatomicSnapshot(t, mainDir))
+			harvestatomicSameSnapshot(t, "source", sourceBefore, harvestatomicSnapshot(t, worktreeDir))
+			if stdout != "" {
+				t.Fatalf("failed harvest must print nothing on stdout; got %q", stdout)
+			}
+			for _, id := range []string{"ask-bbbb", "ask-dddd"} {
+				if !strings.Contains(stderr, id) {
+					t.Fatalf("stderr should name every unreadable id; missing %s in %q", id, stderr)
+				}
+			}
+			if kind == "schema" && !strings.Contains(stderr, "schema_version") {
+				t.Fatalf("stderr should name schema_version: %q", stderr)
+			}
+		})
 	}
 }

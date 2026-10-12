@@ -27,15 +27,17 @@ type harvestJSONOutput struct {
 
 // runHarvest implements `ask harvest --from <path> [--clean] [--json]`.
 // Both source and target must be initialized .ask/ stores. Pre-flight
-// collision detection means the verb either fully succeeds or refuses
-// without mutating either store. With --clean the source items are
+// collision detection and a read-everything-first validation pass mean
+// the verb either fully succeeds or refuses without mutating either
+// store. With --clean the source items are
 // removed after a successful copy so re-runs are clean no-ops.
 //
 // Exit codes (spec §2):
 //
 //	0  copy succeeded (including the empty-source case)
 //	2  validation error: --from missing, or source == target
-//	5  I/O error, store-uninitialized, or id collision in target
+//	5  I/O error, store-uninitialized, id collision in target, or an
+//	   unreadable source item (nothing is copied; every such id is named)
 //
 // Idempotent-no-op exit 6 is not used here: an empty source is a real
 // success, not a "already in target state" claim. Re-running after

@@ -89,6 +89,21 @@ Rules:
   one and only legal default. Treat any *explicit* non-empty value other
   than `"1"` as a hard error in v1 (the field exists precisely so a
   future ask version can detect it and either migrate or refuse).
+  Concretely: the item is unreadable to this binary, on the same
+  per-item footing as a corrupt item file (§7.2). `ask show` and every
+  verb that would rewrite the item (`resolve`, `close`, `reopen`,
+  `update`, `harvest`, and their MCP twins) fail with exit 5 and a
+  message naming `schema_version` and the value found; the file is left
+  byte-identical, and the item is never listed as an ordinary v1 item.
+  The check runs before any other field is interpreted.
+  `harvest` is all-or-nothing about this: it reads and validates every
+  source item before writing any, so if one or more are unreadable
+  (non-v1 or corrupt) it exits 5 naming each such id, having copied
+  nothing into the target and — `--clean` or not — removed nothing from
+  the source. It never skips an unreadable item.
+- **Write path refusal:** `core.FileStore.Save` refuses to write an Item
+  whose `schema_version` is anything other than `"1"`, so no code path
+  can produce or overwrite a non-v1 item file.
 - **No migration framework in v1.** The field is in place so a v1.x
   bump has a hook to migrate from; the framework itself is deferred
   (see `docs/distribution-readiness.md` §6 and §12 below). v1 never
@@ -119,7 +134,7 @@ Rules:
 
 ### 1.4 `ask list --json`
 
-A JSON array of Item objects, in the order rendered by the human view (§3). Empty array if nothing matches. Never `null`. The list is sorted server-side; clients should not re-sort.
+A JSON array of Item objects, in the order rendered by the human view (§3). Empty array if nothing matches. Never `null`. Unreadable item files are left out of the array and warned about on stderr (§7.2). The list is sorted server-side; clients should not re-sort.
 
 ```json
 [
@@ -205,7 +220,7 @@ The full taxonomy. Every CLI invocation returns exactly one of these.
 | `2` | Validation error | bad flag, missing required arg, title >200 chars, urgency not in set, invalid transition (e.g. `resolve` on a `closed` item), unknown subcommand, unknown help topic, attempt to set `verifier.type` to a reserved-but-unimplemented value (`url`, `mcp`) |
 | `3` | Not found | id prefix matches zero items |
 | `4` | Ambiguous id prefix | id prefix matches >1 items |
-| `5` | I/O / disk error | cannot read/write `.ask/`, corrupt `config.json` (§7), atomic-rename failure, no `.ask/` present when one is required (run `ask init` first) |
+| `5` | I/O / disk error | cannot read/write `.ask/`, corrupt `config.json` (§7), an item file that is corrupt or carries a `schema_version` other than `"1"` (§1.1.1) when a verb addresses that item (`ask list` skips it with a warning and exits `5` only if no item was readable, §7.2), atomic-rename failure, no `.ask/` present when one is required (run `ask init` first) |
 | `6` | Already-handled idempotent no-op | `resolve` on a `resolved` item, `close` on a `closed` item, `reopen` on an `open` item, `ask init` in an already-initialized directory when no fields would change. Always paired with a stderr warning. Stdout still emits the success-shape (id or item) so scripts can pipe results uniformly. |
 | `7` | Stranded store | `.ask/config.json` is absent but `.ask/items/` holds item files (§7). Distinct from `5` so a consumer can tell "no inbox here" from "an unreachable inbox holding N asks" without inspecting `.ask/items/` itself. `ask init` in that directory is the repair; it adopts the existing items. |
 
@@ -312,9 +327,11 @@ Implements act's prefix-resolution policy:
 
 ### 5.1 Common conventions
 
-- Tool names: `ask_new`, `ask_list`, `ask_show`, `ask_resolve`, `ask_reopen`, `ask_close`. (`ask_init` is **not** exposed via MCP in v1 — initialization is a developer action, not an agent action.)
+- Tool names: `ask_new`, `ask_list`, `ask_show`, `ask_update`, `ask_resolve`, `ask_reopen`, `ask_close`. (`init` and `harvest` are **not** exposed via MCP — setting up or administering a store is a developer action, not something an agent does to an item mid-loop.)
 - Required vs optional in each schema mirrors CLI requiredness.
-- Response framing: every tool returns `{ "content": [{ "type": "text", "text": "<json>" }], "isError": false }` where `<json>` is the same payload the CLI emits with `--json`. The JSON-encoded payload is in the `text` field (single-string convention; agents JSON-parse the `text`).
+- Every `maxLength` a schema advertises is enforced by the server, not left to the client: a longer value is a validation error (code 2, §5.5) whose message names the field and the limit, e.g. `ask new: body exceeds 16384 characters (got 16385)`, and nothing is written. Length is counted in characters (Unicode code points), as JSON Schema defines `maxLength`. These are limits of the MCP boundary; the CLI does not apply the free-text caps.
+- Response framing: every tool returns `{ "content": [{ "type": "text", "text": "<json>" }] }` on success, where `<json>` is the same payload the CLI emits with `--json`. The JSON-encoded payload is in the `text` field (single-string convention; agents JSON-parse the `text`).
+- `isError` is **omitted** from a successful result — the key is absent, not `false`. Per MCP an absent `isError` means false, so a client must read it as "false unless present and true" rather than require the key. It is present, as `true`, only on the §5.5 error envelope. Where this document says a result is "`isError: false`" it means that reading: no `isError` key on the wire.
 
 ### 5.2 `ask_new`
 
@@ -411,7 +428,7 @@ post-filtering on the client. Composes with the other filters as AND.
 
 Defaults match the CLI: omitted `status` and no `all` → items with `status != closed`. `all: true` plus a `status` value is a validation error.
 
-Return: an array of Item objects (§1.4).
+Return: an array of Item objects (§1.4). Item files that cannot be read are skipped and reported as extra `content` entries after the array; see §7.2 for the shape.
 
 ### 5.4 `ask_show`, `ask_resolve`, `ask_reopen`, `ask_close`
 
@@ -434,6 +451,32 @@ All four take `id` as the required arg. `resolve` accepts an optional `note`; `r
 
 Return: the post-transition (or current, for `ask_show`) Item object (§1.5 / §1.8).
 
+### 5.4.1 `ask_update`
+
+The MCP twin of `ask update` (§1.8.1): corrects `title` and/or `body` in place, makes no state transition, allowed in any status.
+
+```json
+{
+  "type": "object",
+  "required": ["id"],
+  "additionalProperties": false,
+  "properties": {
+    "id":          { "type": "string", "minLength": 1 },
+    "title":       { "type": "string", "minLength": 1, "maxLength": 200 },
+    "body":        { "type": "string", "maxLength": 16384 },
+    "body_append": { "type": "string", "maxLength": 16384 }
+  }
+}
+```
+
+- `title` replaces the title (same validation and trimming as `--title`).
+- `body` replaces the body; an explicit empty string clears it, an omitted field leaves it alone.
+- `body_append` appends after a blank line, as `--body-append`. The body that results is bounded as well as the piece appended: an append that would take the body past 16384 characters is a validation error (code 2) and writes nothing, so repeated appends cannot grow an item without limit. The message is `ask update: body_append would grow body past 16384 characters (body is <n> now, would be <m>)`.
+- `body` and `body_append` together are a validation error (code 2), as is a call naming none of the three.
+- `--body-file` / `--body-append-file` have no twin: an MCP caller already holds the text.
+
+Return: the updated Item object. When the item already reads as requested, no write happens and the call returns the §5.5 no-op envelope, with `content[1].text == "ask update: <id> already reads as requested"`.
+
 ### 5.5 MCP error envelope
 
 On any non-success outcome, the tool returns:
@@ -447,12 +490,12 @@ On any non-success outcome, the tool returns:
 }
 ```
 
-- `code` is the exit-code taxonomy value (§2): 2/3/4/5/6/7.
+- `code` is the exit-code taxonomy value (§2), and is always one of `2`, `3`, `4`, `5`, `7` — the codes a tool call can fail with. It is never `6`: an idempotent no-op is a success (next bullet) and carries no error envelope, so `6` exists only as a CLI exit status.
 - `message` is the same human-readable string the CLI would have printed to stderr.
 - Idempotent no-ops (code 6) are returned as `isError: false` with the item payload **and** an additional `content` text element containing the warning, mirroring the CLI's stdout-success-plus-stderr-warning pattern. (Justification: an MCP-side warning that arrives as `isError: true` is the wrong affordance — the call succeeded.) Concretely:
   - The `content` array has exactly two entries, both `type: "text"`.
   - `content[0].text` is the JSON-encoded post-call Item (identical to the active-transition success body), so clients parsing `content[0]` always get an Item regardless of whether the call was a real transition or a no-op.
-  - `content[1].text` is the verbatim warning string `ask <verb>: already <status>`, matching the CLI's stderr line and serving as the structured no-op signal an orchestrator/verifier can match on without diffing item state.
+  - `content[1].text` is the verbatim warning string `ask <verb>: already <status>` (for `ask_update`: `ask update: <id> already reads as requested`), matching the CLI's stderr line and serving as the structured no-op signal an orchestrator/verifier can match on without diffing item state.
   - Example for `ask_resolve` on an already-resolved item: `content[1].text == "ask resolve: already resolved"`.
 
 JSON-RPC framing errors (malformed input, unknown method) are returned as JSON-RPC `error` objects per the spec (`-32600` etc.), not via the tool envelope.
@@ -526,6 +569,16 @@ Opening a store for a read (any verb other than `ask init`) is **non-mutating**:
 
 Item files (`.ask/items/ask-XXXX.json`) follow the same policy individually: a corrupt item file makes that one id unreadable (`ask show ask-XXXX` → exit 5, `ask list` skips it and emits a stderr warning per skipped id but continues with the rest, exit 0 if at least one item was readable, exit 5 only if every requested item was unreadable). The skip-and-warn behavior is the only deviation from "no auto-recovery"; it is necessary so that one bad file does not lock the entire inbox.
 
+The details of that rule, for `ask list` and `ask_list` alike:
+
+- **Unreadable** means the file cannot be loaded as a v1 item: it is not valid JSON, it carries a `schema_version` other than `"1"` (§1.1.1), or the file itself cannot be read. Listing never rewrites, moves or deletes such a file.
+- **The warning** is one stderr line per skipped id, in id order: `ask list: skipped <id>: <reason>`, where `<reason>` is the same reason `ask show <id>` reports for that item. Warnings go to stderr only; stdout is exactly the list, so `ask list --json` stays a valid JSON array (§1.4) holding the readable items.
+- **Readability is judged before the filters run.** An unreadable file's status, urgency, `blocks` and `recipient` are unknown, so it cannot be matched against `--status` and the rest; it is always reported as skipped, whatever filters were given. The exit is `0` whenever at least one item file was readable — even if the filters then exclude every readable item, which lists nothing (`[]` under `--json`).
+- **Exit 5** is reserved for a store where item files exist and none of them is readable. The per-id warnings are followed by `ask list: no readable items (<n> unreadable)` and stdout is empty — not `[]`, which would read as an empty inbox.
+- **An empty store** (no item files at all) is not this case: it lists as empty and exits `0` with no warning.
+- **Other verbs are unaffected by a neighbour's bad file.** Id and prefix resolution reads file names, not file contents, so `show`, `update`, `resolve`, `reopen`, `close` and `new` keep working on every readable id; only a verb addressed at the unreadable item itself fails, with exit 5 and the file left byte-identical.
+- **MCP shape (`ask_list`).** Skips are a success with warnings, in the §5.5 style: `isError: false`, `content[0].text` is the JSON array of readable items (so a client parsing `content[0]` always gets an array), and each skipped id adds one further `type: "text"` entry carrying the same line the CLI writes to stderr, in id order. A store with nothing skipped returns the single entry it always has. When no item file is readable the call returns the §5.5 error envelope with `code: 5`, and since there is no stderr the one `message` names every skipped id: `ask list: no readable items (<n> unreadable): skipped <id>: <reason>; skipped <id>: <reason>`.
+
 ---
 
 ## 8. Atomic writes and the store lock
@@ -550,7 +603,7 @@ Edge cases:
 Atomic rename keeps one write whole; it does not stop two writers from each loading an item, changing their copy, and saving it, the second save discarding the first change. One advisory lock per store does:
 
 - The lock is `flock(LOCK_EX)` on `.ask/.lock`. The file is created by the first write that needs it and is never removed; its content is never read.
-- `resolve`, `reopen`, `close` and `update`, on the CLI, and `ask_resolve`, `ask_reopen` and `ask_close` over MCP, hold the lock across the whole sequence: resolve the id prefix, load the item, apply the change, save. Both surfaces call one function for this, so they cannot drift apart.
+- `resolve`, `reopen`, `close` and `update`, on the CLI, and `ask_resolve`, `ask_reopen`, `ask_close` and `ask_update` over MCP, hold the lock across the whole sequence: resolve the id prefix, load the item, apply the change, save. Both surfaces call one function for this, so they cannot drift apart.
 - `ask harvest` holds the target's and the source's locks for the whole operation, taken in path order so two harvests in opposite directions cannot each hold one.
 - The lock is taken by trying a non-blocking `flock` every 25 ms for at most 10 s. On timeout the verb exits `5` (MCP code `5`) with `ask <verb>: store is locked by another ask process (waited 10s); nothing was written`. Every locked section is a few milliseconds, so the timeout only fires when another process is stuck while holding the lock. A process that dies releases its lock.
 - Reads (`list`, `show`, and their MCP tools) take no lock, never wait on a writer, and never create `.ask/.lock`.

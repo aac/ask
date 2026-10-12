@@ -169,6 +169,7 @@ func TestToolsList(t *testing.T) {
 		"ask_new":     false,
 		"ask_list":    false,
 		"ask_show":    false,
+		"ask_update":  false,
 		"ask_resolve": false,
 		"ask_reopen":  false,
 		"ask_close":   false,
@@ -888,5 +889,302 @@ func TestAskReopenOnOpenIsNoop(t *testing.T) {
 	got := assertNoopEnvelope(t, tr, "reopen", "open")
 	if got.ID != it.ID {
 		t.Errorf("returned id: got %q want %q", got.ID, it.ID)
+	}
+}
+
+// ----- ask_update ------------------------------------------------------------
+
+// mcpupdCall invokes ask_update with the given arguments and returns the
+// full toolResult envelope.
+func mcpupdCall(t *testing.T, root string, id int, args map[string]any) toolResult {
+	t.Helper()
+	resp := driveRequest(t, root, map[string]any{
+		"jsonrpc": "2.0", "id": id, "method": "tools/call",
+		"params": map[string]any{"name": "ask_update", "arguments": args},
+	})
+	return extractToolResult(t, resp)
+}
+
+// mcpupdShow reads an item back through ask_show, so round-trip
+// assertions see what a later MCP caller sees rather than the update
+// call's own return value.
+func mcpupdShow(t *testing.T, root, itemID string, id int) core.Item {
+	t.Helper()
+	resp := driveRequest(t, root, map[string]any{
+		"jsonrpc": "2.0", "id": id, "method": "tools/call",
+		"params": map[string]any{"name": "ask_show", "arguments": map[string]any{"id": itemID}},
+	})
+	body, isErr := extractToolBody(t, resp)
+	if isErr {
+		t.Fatalf("ask_show isError: %s", body)
+	}
+	var it core.Item
+	if err := json.Unmarshal(body, &it); err != nil {
+		t.Fatalf("decode shown item: %v\nbody: %s", err, body)
+	}
+	return it
+}
+
+// mcpupdNew files an ask with a title and body and returns it.
+func mcpupdNew(t *testing.T, root, title, body string, id int) core.Item {
+	t.Helper()
+	resp := driveRequest(t, root, map[string]any{
+		"jsonrpc": "2.0", "id": id, "method": "tools/call",
+		"params": map[string]any{
+			"name":      "ask_new",
+			"arguments": map[string]any{"title": title, "body": body},
+		},
+	})
+	raw, isErr := extractToolBody(t, resp)
+	if isErr {
+		t.Fatalf("ask_new isError: %s", raw)
+	}
+	var it core.Item
+	if err := json.Unmarshal(raw, &it); err != nil {
+		t.Fatalf("decode new item: %v\nbody: %s", err, raw)
+	}
+	return it
+}
+
+// mcpupdWantErr asserts the single-part error envelope with the given
+// code and a message containing wantMsg.
+func mcpupdWantErr(t *testing.T, tr toolResult, wantCode int, wantMsg string) {
+	t.Helper()
+	if !tr.IsError {
+		t.Fatalf("want isError=true, got false; content=%+v", tr.Content)
+	}
+	if len(tr.Content) != 1 {
+		t.Fatalf("want 1 content part, got %d: %+v", len(tr.Content), tr.Content)
+	}
+	var env errEnvelope
+	if err := json.Unmarshal([]byte(tr.Content[0].Text), &env); err != nil {
+		t.Fatalf("decode error envelope: %v\nbody: %s", err, tr.Content[0].Text)
+	}
+	if env.Code != wantCode {
+		t.Errorf("code: got %d want %d (message %q)", env.Code, wantCode, env.Message)
+	}
+	if !strings.HasPrefix(env.Message, "ask update: ") || !strings.Contains(env.Message, wantMsg) {
+		t.Errorf("message: got %q, want prefix %q and substring %q", env.Message, "ask update: ", wantMsg)
+	}
+}
+
+// TestAskUpdateSchema pins the advertised ask_update schema: id is the
+// only required field, the three text fields are present, and the CLI's
+// file-reading variants are not.
+func TestAskUpdateSchema(t *testing.T) {
+	resp := driveRequest(t, t.TempDir(), map[string]any{"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
+	rb, _ := json.Marshal(resp.Result)
+	var got struct {
+		Tools []struct {
+			Name        string `json:"name"`
+			InputSchema struct {
+				Required             []string       `json:"required"`
+				AdditionalProperties *bool          `json:"additionalProperties"`
+				Properties           map[string]any `json:"properties"`
+			} `json:"inputSchema"`
+		} `json:"tools"`
+	}
+	if err := json.Unmarshal(rb, &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	for _, td := range got.Tools {
+		if td.Name != "ask_update" {
+			continue
+		}
+		if len(td.InputSchema.Required) != 1 || td.InputSchema.Required[0] != "id" {
+			t.Errorf("required: got %v want [id]", td.InputSchema.Required)
+		}
+		if td.InputSchema.AdditionalProperties == nil || *td.InputSchema.AdditionalProperties {
+			t.Errorf("additionalProperties must be false")
+		}
+		for _, p := range []string{"id", "title", "body", "body_append"} {
+			if _, ok := td.InputSchema.Properties[p]; !ok {
+				t.Errorf("schema missing property %q", p)
+			}
+		}
+		if len(td.InputSchema.Properties) != 4 {
+			t.Errorf("want exactly 4 properties, got %v", td.InputSchema.Properties)
+		}
+		return
+	}
+	t.Fatal("tools/list has no ask_update")
+}
+
+// TestAskUpdateRoundTrip is the acceptance path: new → update title →
+// update body_append → show reflects both, and the item is still open
+// with no lifecycle timestamps stamped.
+func TestAskUpdateRoundTrip(t *testing.T) {
+	root := t.TempDir()
+	initRepo(t, root)
+	it := mcpupdNew(t, root, "Set up Gmail OAuth", "Original body.", 1)
+
+	tr := mcpupdCall(t, root, 2, map[string]any{"id": it.ID, "title": "  Set up Gmail OAuth (prod)  "})
+	if tr.IsError || len(tr.Content) != 1 {
+		t.Fatalf("title update: isError=%v content=%+v", tr.IsError, tr.Content)
+	}
+	var afterTitle core.Item
+	if err := json.Unmarshal([]byte(tr.Content[0].Text), &afterTitle); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if afterTitle.Title != "Set up Gmail OAuth (prod)" {
+		t.Errorf("returned title: got %q (want trimmed new title)", afterTitle.Title)
+	}
+
+	tr = mcpupdCall(t, root, 3, map[string]any{"id": it.ID, "body_append": "2026-10-11: still needed."})
+	if tr.IsError || len(tr.Content) != 1 {
+		t.Fatalf("body_append: isError=%v content=%+v", tr.IsError, tr.Content)
+	}
+
+	got := mcpupdShow(t, root, it.ID, 4)
+	if got.Title != "Set up Gmail OAuth (prod)" {
+		t.Errorf("shown title: got %q", got.Title)
+	}
+	if want := "Original body.\n\n2026-10-11: still needed."; got.Body != want {
+		t.Errorf("shown body: got %q want %q", got.Body, want)
+	}
+	if got.Status != core.StatusOpen {
+		t.Errorf("status: got %q, update must not transition", got.Status)
+	}
+	if got.ResolvedAt != nil || got.ClosedAt != nil {
+		t.Errorf("update stamped a lifecycle timestamp: resolved_at=%v closed_at=%v", got.ResolvedAt, got.ClosedAt)
+	}
+}
+
+// TestAskUpdateBodyReplaceAndClear pins the absent-vs-empty distinction:
+// `body` replaces, an explicit empty string clears, and an update that
+// names only the title leaves the body alone.
+func TestAskUpdateBodyReplaceAndClear(t *testing.T) {
+	root := t.TempDir()
+	initRepo(t, root)
+	it := mcpupdNew(t, root, "t", "old", 1)
+
+	if tr := mcpupdCall(t, root, 2, map[string]any{"id": it.ID, "body": "new"}); tr.IsError {
+		t.Fatalf("replace: %+v", tr.Content)
+	}
+	if got := mcpupdShow(t, root, it.ID, 3); got.Body != "new" {
+		t.Fatalf("body after replace: %q", got.Body)
+	}
+	if tr := mcpupdCall(t, root, 4, map[string]any{"id": it.ID, "title": "t2"}); tr.IsError {
+		t.Fatalf("title only: %+v", tr.Content)
+	}
+	if got := mcpupdShow(t, root, it.ID, 5); got.Body != "new" {
+		t.Fatalf("title-only update touched the body: %q", got.Body)
+	}
+	if tr := mcpupdCall(t, root, 6, map[string]any{"id": it.ID, "body": ""}); tr.IsError {
+		t.Fatalf("clear: %+v", tr.Content)
+	}
+	if got := mcpupdShow(t, root, it.ID, 7); got.Body != "" {
+		t.Fatalf("body after clear: %q", got.Body)
+	}
+}
+
+// TestAskUpdateErrors covers the validation and lookup refusals, each
+// with the code the CLI verb exits with.
+func TestAskUpdateErrors(t *testing.T) {
+	root := t.TempDir()
+	initRepo(t, root)
+	it := mcpupdNew(t, root, "keep me", "keep body", 1)
+
+	cases := []struct {
+		name     string
+		args     map[string]any
+		wantCode int
+		wantMsg  string
+	}{
+		{"unknown id", map[string]any{"id": "ask-ffff", "title": "x"}, 3, "not found"},
+		{"no fields", map[string]any{"id": it.ID}, 2, "nothing to update"},
+		{"body and body_append", map[string]any{"id": it.ID, "body": "a", "body_append": "b"}, 2, "mutually exclusive"},
+		{"missing id", map[string]any{"title": "x"}, 2, "id required"},
+		{"empty title", map[string]any{"id": it.ID, "title": "   "}, 2, "title must not be empty"},
+		{"long title", map[string]any{"id": it.ID, "title": strings.Repeat("x", 201)}, 2, "1..200"},
+		{"newline title", map[string]any{"id": it.ID, "title": "a\nb"}, 2, "newlines"},
+		{"wrong type", map[string]any{"id": it.ID, "title": 7}, 2, ""},
+	}
+	for i, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			mcpupdWantErr(t, mcpupdCall(t, root, 10+i, tc.args), tc.wantCode, tc.wantMsg)
+		})
+	}
+
+	// None of the refused calls may have written anything.
+	got := mcpupdShow(t, root, it.ID, 99)
+	if got.Title != "keep me" || got.Body != "keep body" {
+		t.Errorf("a refused update mutated the item: title=%q body=%q", got.Title, got.Body)
+	}
+}
+
+// TestAskUpdateUninitializedStore: no .ask/ → code 5, like the siblings.
+func TestAskUpdateUninitializedStore(t *testing.T) {
+	tr := mcpupdCall(t, t.TempDir(), 1, map[string]any{"id": "ask-0000", "title": "x"})
+	mcpupdWantErr(t, tr, 5, "")
+}
+
+// TestAskUpdateNoop pins the §5.5 no-op envelope for ask_update: asking
+// for the text already on disk returns isError=false, the unchanged Item,
+// and the warning the CLI writes to stderr — and does not rewrite the file.
+func TestAskUpdateNoop(t *testing.T) {
+	root := t.TempDir()
+	initRepo(t, root)
+	it := mcpupdNew(t, root, "same title", "same body", 1)
+	path := filepath.Join(root, ".ask", "items", it.ID+".json")
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	// Make the file read-only-distinguishable: a rewrite would reset this
+	// mtime to now.
+	old := time.Now().Add(-time.Hour)
+	if err := os.Chtimes(path, old, old); err != nil {
+		t.Fatalf("chtimes: %v", err)
+	}
+
+	tr := mcpupdCall(t, root, 2, map[string]any{"id": it.ID, "title": "same title", "body": "same body"})
+	if tr.IsError {
+		t.Fatalf("no-op must have isError=false: %+v", tr.Content)
+	}
+	if len(tr.Content) != 2 {
+		t.Fatalf("no-op must have 2 content parts, got %d: %+v", len(tr.Content), tr.Content)
+	}
+	var got core.Item
+	if err := json.Unmarshal([]byte(tr.Content[0].Text), &got); err != nil {
+		t.Fatalf("decode item part: %v", err)
+	}
+	if got.ID != it.ID {
+		t.Errorf("item part id: got %q want %q", got.ID, it.ID)
+	}
+	if want := "ask update: " + it.ID + " already reads as requested"; tr.Content[1].Text != want {
+		t.Errorf("warning: got %q want %q", tr.Content[1].Text, want)
+	}
+	st, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+	if st.ModTime().After(old.Add(time.Minute)) {
+		t.Error("no-op update rewrote the item file")
+	}
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Error("no-op update changed the item file's bytes")
+	}
+}
+
+// TestAskUpdateOnClosedItem: correcting the record of a closed ask is
+// allowed and leaves it closed.
+func TestAskUpdateOnClosedItem(t *testing.T) {
+	root := t.TempDir()
+	initRepo(t, root)
+	it := mcpupdNew(t, root, "t", "b", 1)
+	if tr := callMutate(t, root, "ask_close", it.ID, 2); tr.IsError {
+		t.Fatalf("close: %+v", tr.Content)
+	}
+	if tr := mcpupdCall(t, root, 3, map[string]any{"id": it.ID, "body_append": "note"}); tr.IsError {
+		t.Fatalf("update on closed: %+v", tr.Content)
+	}
+	got := mcpupdShow(t, root, it.ID, 4)
+	if got.Status != core.StatusClosed || got.Body != "b\n\nnote" {
+		t.Errorf("got status=%q body=%q", got.Status, got.Body)
 	}
 }
