@@ -433,7 +433,8 @@ func TestMaxLengthCountsCharactersNotBytes(t *testing.T) {
 }
 
 // TestBodyAppendCapsTheArgumentNotTheResult: each body_append is capped
-// at 16384 characters, but the body it produces is not (act-58c1b4). The
+// at 16384 characters; the body it produces is not held to that cap, only
+// to the far higher maxAppendedBodyLen ceiling (act-58c1b4). The
 // caps are limits on what one call may send; the CLI files bodies of any
 // length, so a stored body may be longer and appends to it must land.
 func TestBodyAppendCapsTheArgumentNotTheResult(t *testing.T) {

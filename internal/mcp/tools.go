@@ -56,7 +56,14 @@ const maxRecipientRefLen = 1024
 // of the free-text caps (an ask refused at filing time is an ask lost),
 // so a stored body can already be longer, and a within-limit body_append
 // to it is accepted.
+//
+// maxAppendedBodyLen is the one cap on a stored result rather than an
+// argument: ask_update refuses a body_append that would leave the body
+// longer than this, so repeated within-limit appends cannot grow an item
+// without bound through the MCP boundary. It is far above maxTextLen so
+// it never blocks an append to a body the CLI wrote long.
 const (
+	maxAppendedBodyLen    = 1048576
 	maxTextLen            = 16384
 	maxFiledByLen         = 256
 	maxTrackerRefLen      = 256
@@ -787,10 +794,22 @@ func callUpdate(repoRoot string, raw json.RawMessage) ([]toolContent, bool) {
 		return textContent(encodeErr(2, msg)), true
 	}
 	ch, errBody := lockedChange(repoRoot, "update", args.ID, func(it *core.Item, _ time.Time) error {
-		// No bound on the body that results: the caps limit what one
-		// call may send, not what is stored. The CLI files bodies of any
-		// length (spec §1.1), so the stored body may already be past
-		// maxTextLen, and a within-limit append to it must still land.
+		if args.BodyAppend != nil {
+			// The per-argument cap (maxTextLen) does not bound the body
+			// that results: the CLI files bodies of any length (spec
+			// §1.1), so the stored body may already be past it, and a
+			// within-limit append must still land. What is bounded is
+			// the total, at maxAppendedBodyLen, so a client appending in
+			// a loop cannot grow an item forever. Checked on the same
+			// join Apply performs, against the body on disk under the
+			// lock.
+			joined := core.AppendBody(it.Body, *args.BodyAppend)
+			if _, bad := tooLong("update", "body", joined, maxAppendedBodyLen); bad {
+				return fmt.Errorf(
+					"body_append would grow body past %d characters (body is %d now, would be %d)",
+					maxAppendedBodyLen, utf8.RuneCountInString(it.Body), utf8.RuneCountInString(joined))
+			}
+		}
 		upd.Apply(it)
 		return nil
 	})

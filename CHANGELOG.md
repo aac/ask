@@ -96,7 +96,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `label` / `url` each carried a `maxLength` that nothing checked, so a caller that ignored
   the schema could file or grow an item of any size. An over-length value is now a
   validation error (code 2) naming the field and the limit, and nothing is written.
-  Each limit applies to the argument a call sends, not to what is stored. The CLI is
+  Each limit applies to the argument a call sends, not to what is stored (the one exception
+  is the 1048576-character ceiling on the body a `body_append` produces). The CLI is
   unchanged: it applies no cap to `body` or the other free-text fields, on purpose, because
   an ask refused at filing time is lost (spec 1.1 now says so instead of reading as a hard
   limit).
@@ -134,8 +135,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - An MCP `body_append` to an item whose body is already past 16384 characters now succeeds.
   The CLI files bodies of any length, and `ask_update` refused every append to such an item
   with `body_append would grow body past 16384 characters`, leaving it uneditable over MCP.
-  The cap is on the `body_append` argument (still 16384 characters), not on the body that
-  results.
+  The 16384 cap is on the `body_append` argument, not on the body that results. The result
+  has its own ceiling of 1048576 characters, so a client appending in a loop still cannot
+  grow an item without limit: an append past it is a validation error (code 2) and writes
+  nothing. The CLI has no ceiling.
 
 ## [0.2.1]
 

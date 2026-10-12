@@ -82,3 +82,41 @@ func TestTitleLimitCountsCharactersNotBytes(t *testing.T) {
 		t.Fatalf("ask_update: a 201-character title was not refused with code 2: %.200s", tr.Content[0].Text)
 	}
 }
+
+// TestBodyAppendCeilingOnStoredBody: the result of a body_append is
+// bounded at maxAppendedBodyLen characters, so a client appending
+// within-limit chunks in a loop cannot grow an item forever. The
+// near-limit body is written straight into the store; no loop needed.
+func TestBodyAppendCeilingOnStoredBody(t *testing.T) {
+	root := t.TempDir()
+	initRepo(t, root)
+	it := mcpupdNew(t, root, "seed", "short", 1)
+	// Multi-byte characters: the ceiling counts code points, not bytes.
+	// An append costs the two-character separator plus the text, so
+	// (max-3) + 2 + 1 lands exactly on the ceiling.
+	lenlimSetBody(t, root, it.ID, strings.Repeat("é", maxAppendedBodyLen-3))
+
+	tr := mcpdriftCall(t, root, "ask_update", map[string]any{"id": it.ID, "body_append": "y"})
+	if tr.IsError {
+		t.Fatalf("append landing exactly on the ceiling was refused: %.200s", tr.Content[0].Text)
+	}
+	if got := utf8.RuneCountInString(mcpupdShow(t, root, it.ID, 2).Body); got != maxAppendedBodyLen {
+		t.Fatalf("body after append: %d characters, want %d", got, maxAppendedBodyLen)
+	}
+
+	before := mcpdriftSnapshot(t, root)
+	tr = mcpdriftCall(t, root, "ask_update", map[string]any{"id": it.ID, "body_append": "z"})
+	if !tr.IsError || mcpdriftErrCode(t, tr) != 2 {
+		t.Fatalf("append past the ceiling was not refused with code 2: %.200s", tr.Content[0].Text)
+	}
+	want := "ask update: body_append would grow body past 1048576 characters (body is 1048576 now, would be 1048579)"
+	if !strings.Contains(tr.Content[0].Text, want) {
+		t.Fatalf("message does not name the field and the limit:\n got: %.300s\nwant: %s", tr.Content[0].Text, want)
+	}
+	mcpdriftSameStore(t, root, before)
+
+	// A title-only correction of an item at the ceiling is still allowed.
+	if tr := mcpdriftCall(t, root, "ask_update", map[string]any{"id": it.ID, "title": "renamed"}); tr.IsError {
+		t.Fatalf("title-only update of an item at the ceiling was refused: %.200s", tr.Content[0].Text)
+	}
+}
