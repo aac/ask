@@ -329,6 +329,7 @@ Implements act's prefix-resolution policy:
 
 - Tool names: `ask_new`, `ask_list`, `ask_show`, `ask_update`, `ask_resolve`, `ask_reopen`, `ask_close`. (`init` and `harvest` are **not** exposed via MCP — setting up or administering a store is a developer action, not something an agent does to an item mid-loop.)
 - Required vs optional in each schema mirrors CLI requiredness.
+- Every `maxLength` a schema advertises is enforced by the server, not left to the client: a longer value is a validation error (code 2, §5.5) whose message names the field and the limit, e.g. `ask new: body exceeds 16384 characters (got 16385)`, and nothing is written. Length is counted in characters (Unicode code points), as JSON Schema defines `maxLength`. These are limits of the MCP boundary; the CLI does not apply the free-text caps.
 - Response framing: every tool returns `{ "content": [{ "type": "text", "text": "<json>" }], "isError": false }` where `<json>` is the same payload the CLI emits with `--json`. The JSON-encoded payload is in the `text` field (single-string convention; agents JSON-parse the `text`).
 
 ### 5.2 `ask_new`
@@ -469,7 +470,7 @@ The MCP twin of `ask update` (§1.8.1): corrects `title` and/or `body` in place,
 
 - `title` replaces the title (same validation and trimming as `--title`).
 - `body` replaces the body; an explicit empty string clears it, an omitted field leaves it alone.
-- `body_append` appends after a blank line, as `--body-append`.
+- `body_append` appends after a blank line, as `--body-append`. The body that results is bounded as well as the piece appended: an append that would take the body past 16384 characters is a validation error (code 2) and writes nothing, so repeated appends cannot grow an item without limit. The message is `ask update: body_append would grow body past 16384 characters (body is <n> now, would be <m>)`.
 - `body` and `body_append` together are a validation error (code 2), as is a call naming none of the three.
 - `--body-file` / `--body-append-file` have no twin: an MCP caller already holds the text.
 

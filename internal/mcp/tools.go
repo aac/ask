@@ -27,6 +27,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/aac/ask/internal/core"
 )
@@ -42,6 +43,43 @@ const maxBlocksRefLen = 1024
 // duplicated to keep MCP independent of the CLI package.
 const maxRecipientRefLen = 1024
 
+// Length caps advertised as `maxLength` in the tool schemas below. A
+// schema is only a hint to the client — nothing on the wire stops a
+// caller from sending more — so every one of these is also enforced in
+// the handler (tooLong) before anything is written. The schemas read
+// these constants rather than repeating the numbers, so what is
+// advertised and what is enforced cannot drift apart.
+//
+// maxTextLen bounds the free-text fields: body, body_append, and the
+// resolve/reopen/close note and reason (spec §1.1). ask_update also
+// applies it to the body that RESULTS from a body_append, so repeated
+// appends cannot grow an item without limit. The CLI enforces none of
+// these today; they are MCP-boundary limits.
+const (
+	maxTextLen            = 16384
+	maxFiledByLen         = 256
+	maxTrackerRefLen      = 256
+	maxVerifierCommandLen = 4096
+	maxLinkLabelLen       = 120
+	maxLinkURLLen         = 2048
+)
+
+// tooLong reports whether s exceeds max characters and, if so, the
+// message to return (code 2), naming the field and the limit. Length is
+// counted in Unicode code points, which is what JSON Schema's maxLength
+// means, so a value a schema-validating client accepts is never refused
+// here.
+func tooLong(verb, field, s string, max int) (string, bool) {
+	if len(s) <= max {
+		// Byte length bounds the character count; skip the scan.
+		return "", false
+	}
+	if n := utf8.RuneCountInString(s); n > max {
+		return fmt.Sprintf("ask %s: %s exceeds %d characters (got %d)", verb, field, max, n), true
+	}
+	return "", false
+}
+
 // tools returns the static tool descriptors advertised by tools/list. Order
 // matches the CLI verb listing in internal/cli/root.go to make manual diffing
 // trivial.
@@ -56,18 +94,18 @@ func tools() []toolDescriptor {
 				"additionalProperties": false,
 				"properties": map[string]any{
 					"title":       map[string]any{"type": "string", "minLength": 1, "maxLength": 200},
-					"body":        map[string]any{"type": "string", "maxLength": 16384},
+					"body":        map[string]any{"type": "string", "maxLength": maxTextLen},
 					"urgency":     map[string]any{"type": "string", "enum": []string{"blocker", "normal", "fyi"}},
-					"filed_by":    map[string]any{"type": "string", "maxLength": 256},
+					"filed_by":    map[string]any{"type": "string", "maxLength": maxFiledByLen},
 					"recipient":   map[string]any{"type": "string", "minLength": 1, "maxLength": maxRecipientRefLen},
-					"tracker_ref": map[string]any{"type": "string", "maxLength": 256},
+					"tracker_ref": map[string]any{"type": "string", "maxLength": maxTrackerRefLen},
 					"verifier": map[string]any{
 						"type":                 "object",
 						"required":             []string{"command"},
 						"additionalProperties": false,
 						"properties": map[string]any{
 							"type":            map[string]any{"type": "string", "enum": []string{"shell"}},
-							"command":         map[string]any{"type": "string", "minLength": 1, "maxLength": 4096},
+							"command":         map[string]any{"type": "string", "minLength": 1, "maxLength": maxVerifierCommandLen},
 							"timeout_seconds": map[string]any{"type": "integer", "minimum": 1, "maximum": 3600},
 						},
 					},
@@ -79,8 +117,8 @@ func tools() []toolDescriptor {
 							"required":             []string{"label", "url"},
 							"additionalProperties": false,
 							"properties": map[string]any{
-								"label": map[string]any{"type": "string", "minLength": 1, "maxLength": 120},
-								"url":   map[string]any{"type": "string", "minLength": 1, "maxLength": 2048},
+								"label": map[string]any{"type": "string", "minLength": 1, "maxLength": maxLinkLabelLen},
+								"url":   map[string]any{"type": "string", "minLength": 1, "maxLength": maxLinkURLLen},
 							},
 						},
 					},
@@ -146,8 +184,8 @@ func tools() []toolDescriptor {
 				"properties": map[string]any{
 					"id":          map[string]any{"type": "string", "minLength": 1},
 					"title":       map[string]any{"type": "string", "minLength": 1, "maxLength": 200},
-					"body":        map[string]any{"type": "string", "maxLength": 16384},
-					"body_append": map[string]any{"type": "string", "maxLength": 16384},
+					"body":        map[string]any{"type": "string", "maxLength": maxTextLen},
+					"body_append": map[string]any{"type": "string", "maxLength": maxTextLen},
 				},
 			},
 		},
@@ -160,7 +198,7 @@ func tools() []toolDescriptor {
 				"additionalProperties": false,
 				"properties": map[string]any{
 					"id":   map[string]any{"type": "string", "minLength": 1},
-					"note": map[string]any{"type": "string", "maxLength": 16384},
+					"note": map[string]any{"type": "string", "maxLength": maxTextLen},
 				},
 			},
 		},
@@ -173,7 +211,7 @@ func tools() []toolDescriptor {
 				"additionalProperties": false,
 				"properties": map[string]any{
 					"id":     map[string]any{"type": "string", "minLength": 1},
-					"reason": map[string]any{"type": "string", "maxLength": 16384},
+					"reason": map[string]any{"type": "string", "maxLength": maxTextLen},
 				},
 			},
 		},
@@ -186,7 +224,7 @@ func tools() []toolDescriptor {
 				"additionalProperties": false,
 				"properties": map[string]any{
 					"id":     map[string]any{"type": "string", "minLength": 1},
-					"reason": map[string]any{"type": "string", "maxLength": 16384},
+					"reason": map[string]any{"type": "string", "maxLength": maxTextLen},
 				},
 			},
 		},
@@ -274,6 +312,30 @@ func callNew(repoRoot string, raw json.RawMessage) (string, bool) {
 		}
 		if len(args.Recipient) > maxRecipientRefLen {
 			return encodeErr(2, fmt.Sprintf("ask new: recipient: ref exceeds %d characters", maxRecipientRefLen)), true
+		}
+	}
+	// The remaining advertised maxLength caps (the title, blocks and
+	// recipient caps are checked above).
+	type capped struct {
+		field, value string
+		max          int
+	}
+	caps := []capped{
+		{"body", args.Body, maxTextLen},
+		{"filed_by", args.FiledBy, maxFiledByLen},
+		{"tracker_ref", args.TrackerRef, maxTrackerRefLen},
+	}
+	if args.Verifier != nil {
+		caps = append(caps, capped{"verifier.command", args.Verifier.Command, maxVerifierCommandLen})
+	}
+	for i, l := range args.Links {
+		caps = append(caps,
+			capped{fmt.Sprintf("links[%d].label", i), l.Label, maxLinkLabelLen},
+			capped{fmt.Sprintf("links[%d].url", i), l.URL, maxLinkURLLen})
+	}
+	for _, c := range caps {
+		if msg, bad := tooLong("new", c.field, c.value, c.max); bad {
+			return encodeErr(2, msg), true
 		}
 	}
 
@@ -583,6 +645,12 @@ func mutate(repoRoot, verb string, raw json.RawMessage, fn func(idArgs, *core.It
 	if strings.TrimSpace(args.ID) == "" {
 		return textContent(encodeErr(2, fmt.Sprintf("ask %s: id required", verb))), true
 	}
+	if msg, bad := tooLong(verb, "note", args.Note, maxTextLen); bad {
+		return textContent(encodeErr(2, msg)), true
+	}
+	if msg, bad := tooLong(verb, "reason", args.Reason, maxTextLen); bad {
+		return textContent(encodeErr(2, msg)), true
+	}
 	store, full, code, msg, ok := resolveID(repoRoot, verb, args.ID)
 	if !ok {
 		return textContent(encodeErr(code, msg)), true
@@ -664,6 +732,16 @@ func callUpdate(repoRoot string, raw json.RawMessage) ([]toolContent, bool) {
 			return textContent(encodeErr(2, "ask update: "+msg)), true
 		}
 	}
+	if args.Body != nil {
+		if msg, bad := tooLong("update", "body", *args.Body, maxTextLen); bad {
+			return textContent(encodeErr(2, msg)), true
+		}
+	}
+	if args.BodyAppend != nil {
+		if msg, bad := tooLong("update", "body_append", *args.BodyAppend, maxTextLen); bad {
+			return textContent(encodeErr(2, msg)), true
+		}
+	}
 	if strings.TrimSpace(args.ID) == "" {
 		return textContent(encodeErr(2, "ask update: id required")), true
 	}
@@ -677,6 +755,17 @@ func callUpdate(repoRoot string, raw json.RawMessage) ([]toolContent, bool) {
 			return textContent(encodeErr(3, fmt.Sprintf("ask update: id %q not found", full))), true
 		}
 		return textContent(encodeErr(5, "ask update: "+err.Error())), true
+	}
+	if args.BodyAppend != nil {
+		// Bound the body the append would produce, not just the piece
+		// appended: otherwise an item grows without limit one in-bounds
+		// append at a time. Checked on the same join Apply performs.
+		joined := core.AppendBody(it.Body, *args.BodyAppend)
+		if _, bad := tooLong("update", "body", joined, maxTextLen); bad {
+			return textContent(encodeErr(2, fmt.Sprintf(
+				"ask update: body_append would grow body past %d characters (body is %d now, would be %d)",
+				maxTextLen, utf8.RuneCountInString(it.Body), utf8.RuneCountInString(joined)))), true
+		}
 	}
 	changed := upd.Apply(it)
 	if changed {
