@@ -1068,7 +1068,7 @@ func TestFireRunnerRefusesArgumentsNoStatusChangeProduces(t *testing.T) {
 	w := newFireWorld(t, bin)
 	w.install("record", "#!/bin/sh\necho ran > \"$HOME/fire.marker\"\n")
 	id := w.newItem("bad args")
-	sub := w.subscribe(id, "any", "record")
+	sub := w.subscribe(id, "resolve,reopen", "record")
 
 	bad := [][]string{
 		{"resolve\nINJECTED=1", "open", "resolved", "2026-01-02T03:04:05Z"},
@@ -1076,6 +1076,8 @@ func TestFireRunnerRefusesArgumentsNoStatusChangeProduces(t *testing.T) {
 		{"resolve", "open", "done", "2026-01-02T03:04:05Z"},
 		{"resolve", "resolved", "resolved", "2026-01-02T03:04:05Z"},
 		{"resolve", "open", "resolved", "yesterday"},
+		// A real transition, but not one this subscription names.
+		{"close", "open", "closed", "2026-01-02T03:04:05Z"},
 	}
 	for _, tail := range bad {
 		w.mustRun(0, append([]string{"__fire", "v1", id, sub, "0123abcd"}, tail...)...)
