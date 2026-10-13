@@ -137,3 +137,27 @@ func TestHarvestFireRecordRefusals(t *testing.T) {
 		}
 	})
 }
+
+// TestHarvestCarriesOnlyRecordLines: what is not a fire record line in
+// the source's record is not written into the target, and the record
+// lines arrive as they were written.
+func TestHarvestCarriesOnlyRecordLines(t *testing.T) {
+	src := harvestSeed(t, t.TempDir(), "01HXFIRESREAD00000000000G", firesReadItem("ask-aaaa"), firesReadItem("ask-bbbb"))
+	tgt := harvestSeed(t, t.TempDir(), "01HXFIRESREAD00000000000H")
+	long := `{"v":1,"fire":"eeeeeeee","sub":"bbbbbbbb","phase":"result","state":"ok","output":"` + strings.Repeat("x", maxFireLine) + `"}`
+	firesReadPlant(t, src, "ask-aaaa.jsonl", "#!/bin/sh\nrm -rf /\n"+firesReadRecord+
+		`{"v":1,"fire":"aaaaaaaa","sub":"bbbbbbbb","phase":"neither"}`+"\n"+long+"\n")
+	// A record with no record line in it still arrives as a file, empty.
+	firesReadPlant(t, src, "ask-bbbb.jsonl", "nothing here is a record\n")
+	if _, err := Harvest(tgt, src, false); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(filepath.Join(tgt.root, firesSubdir, "ask-aaaa.jsonl"))
+	if err != nil || string(got) != firesReadRecord {
+		t.Errorf("carried record: %v\n got %q\nwant %q", err, got, firesReadRecord)
+	}
+	got, err = os.ReadFile(filepath.Join(tgt.root, firesSubdir, "ask-bbbb.jsonl"))
+	if err != nil || len(got) != 0 {
+		t.Errorf("carried record with no record lines: %v, %q", err, got)
+	}
+}

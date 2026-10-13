@@ -152,6 +152,12 @@ func TestShowFireStates(t *testing.T) {
 				firesResultLine("aaaaaaaa", sub, "spawn_failed", "null", "fork\n      2026-01-01T00:00:00Z  resolve   ok, exit 0 in 0.1 s\x1b[2J", 0, at, ""),
 			}
 		}, []string{atText + "  resolve   not run: could not be started: fork       2026-01-01T00:00:00Z  resolve   ok, exit 0 in 0.1 s [2J"}},
+		{"invisible characters in a detail do not reach the line", func(sub string) []string {
+			return []string{
+				firesStartedLine("aaaaaaaa", sub, "resolve", "open", "resolved", at, at),
+				firesResultLine("aaaaaaaa", sub, "spawn_failed", "null", "a\u202eb\u2066c\u200bd\u2028e\u009bf", 0, at, ""),
+			}
+		}, []string{atText + "  resolve   not run: could not be started: a b c d e f"}},
 		{"timeout", func(sub string) []string {
 			return []string{
 				firesStartedLine("aaaaaaaa", sub, "resolve", "open", "resolved", at, at),
@@ -307,7 +313,9 @@ func TestShowMissedFire(t *testing.T) {
 func TestShowNeverPrintsHandlerOutput(t *testing.T) {
 	bin, _ := fireBinaries(t)
 	w := newFireWorld(t, bin)
-	w.install("loud", "#!/bin/sh\nprintf 'HANDLER-MARKER one\\n\\033[31mHANDLER-MARKER two\\n'\nexit 3\n")
+	// The second line carries an escape sequence and, as UTF-8 bytes in
+	// octal, a right-to-left override (U+202E).
+	w.install("loud", "#!/bin/sh\nprintf 'HANDLER-MARKER one\\n\\033[31mHANDLER-MARKER\\342\\200\\256two\\n'\nexit 3\n")
 	id := w.newItem("loud one")
 	w.subscribe(id, "resolve", "loud")
 	w.mustRun(0, "resolve", id)
@@ -328,14 +336,14 @@ func TestShowNeverPrintsHandlerOutput(t *testing.T) {
 	if !strings.Contains(text, "  output:\n    HANDLER-MARKER one\n     [31mHANDLER-MARKER two\n") {
 		t.Errorf("fires does not print the stored output indented:\n%q", text)
 	}
-	if strings.ContainsRune(text, 0x1b) {
-		t.Errorf("fires printed an escape character:\n%q", text)
+	if strings.ContainsRune(text, 0x1b) || strings.ContainsRune(text, 0x202e) {
+		t.Errorf("fires printed an escape character or a direction override:\n%q", text)
 	}
 	var got []core.Fire
 	if err := json.Unmarshal([]byte(w.mustRun(0, "fires", id, "--json")), &got); err != nil || len(got) != 1 {
 		t.Fatalf("fires --json: %v, %d fires", err, len(got))
 	}
-	if want := "HANDLER-MARKER one\n\x1b[31mHANDLER-MARKER two\n"; got[0].Output != want {
+	if want := "HANDLER-MARKER one\n\x1b[31mHANDLER-MARKER\u202etwo\n"; got[0].Output != want {
 		t.Errorf("fires --json output = %q, want %q", got[0].Output, want)
 	}
 }
@@ -528,5 +536,26 @@ func TestHarvestedItemDoesNotShowMissed(t *testing.T) {
 				t.Errorf("without --clean the source fire record is gone: %v", err)
 			}
 		})
+	}
+}
+
+// TestShowKeepsAStoredSubscriptionToItsLine: a subs file is a file on
+// disk. A handler name or event in it that carries an escape sequence, a
+// line break or a direction override does not reach the terminal.
+func TestShowKeepsAStoredSubscriptionToItsLine(t *testing.T) {
+	dir, id, sub := firesSubscribed(t, "resolve")
+	body := fmt.Sprintf(`{"schema_version":"1","item":%q,"subscriptions":[{"id":%q,"events":["resolve\u001b[1m"],"handler":"rec\u001b[2J\n  - forged\u202e","args":{},"added_at":"2026-01-01T00:00:00Z"}]}`, id, sub.ID)
+	if err := os.WriteFile(subsFilePath(dir, id), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	code, out, errOut := subsRun(t, "show", id)
+	if code != 0 {
+		t.Fatalf("show: exit %d: %s", code, errOut)
+	}
+	if strings.ContainsRune(out, 0x1b) || strings.ContainsRune(out, 0x202e) || strings.Contains(out, "\n  - forged") {
+		t.Errorf("show printed what the subs file planted:\n%q", out)
+	}
+	if !strings.Contains(out, "\n  - "+sub.ID+" rec [2J   - forged on resolve [1m added 2026-01-01T00:00:00Z\n") {
+		t.Errorf("show does not print the subscription on one line:\n%q", out)
 	}
 }

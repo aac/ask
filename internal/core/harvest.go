@@ -114,9 +114,13 @@ type HarvestResult struct {
 //     pass; an unreadable subs file fails the harvest the same way. So is
 //     its fire record (.ask/fires/<id>.jsonl), and so does that fail it.
 //   - Copy pass: each loaded item is Save'd to target, then its
-//     subscriptions, if it has any, then its fire record, if it has one,
-//     byte for byte. Without the record, an item whose handler ran would
-//     read in the target as one whose fire was missed.
+//     subscriptions, if it has any, then its fire record, if it has one:
+//     its record lines as they were written, and no other line (see
+//     fireRecordLines), so nothing but fire record lines is written into
+//     the target. Without the record, an item whose handler ran would
+//     read in the target as one whose fire was missed. Harvest cannot
+//     tell whether a handler really ran: a carried record is the source
+//     store's account, as its items and subscriptions are.
 //   - Optional cleanup: when clean is true, after every copy succeeds the
 //     source files (item, subscriptions and fire record) are removed — by the id each file was listed under,
 //     never by an id read out of its contents. The two passes are ordered (all writes
@@ -200,7 +204,7 @@ func Harvest(target, source *FileStore, clean bool) (*HarvestResult, error) {
 		if hasRecord {
 			// Never nil for a record that exists, even an empty one: nil
 			// is how the passes below know there is none.
-			record = append([]byte{}, record...)
+			record, _ = fireRecordLines(record)
 			fired = append(fired, id)
 		}
 		items = append(items, it)

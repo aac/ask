@@ -235,7 +235,7 @@ func subscriptionFireLines(it *core.Item, sub core.Subscription, fires []core.Fi
 		}
 	}
 	if len(entries) == 0 {
-		return []string{fmt.Sprintf("not fired yet: no %s since this was added", orList(sub.Events))}
+		return []string{fmt.Sprintf("not fired yet: no %s since this was added", oneLine(orList(sub.Events)))}
 	}
 	sort.SliceStable(entries, func(i, j int) bool { return entries[i].at.Before(entries[j].at) })
 	if len(entries) > showFireLines {

@@ -67,6 +67,43 @@ type fireRecordLine struct {
 	Output     string    `json:"output"`
 }
 
+// maxFireLine is the longest line a fire record can hold: a result line
+// with MaxFireOutput bytes of output, every one of them escaped at its
+// longest, and room for the rest. A longer line is not a record line.
+const maxFireLine = 64 << 10
+
+// parseFireLine reports whether raw is a record line: JSON in the known
+// version, with a fire id and a subscription id in the generated shape and
+// one of the two phases.
+func parseFireLine(raw []byte) (fireRecordLine, bool) {
+	var l fireRecordLine
+	if len(raw) > maxFireLine || json.Unmarshal(raw, &l) != nil || l.V != FireRecordVersion ||
+		!hex8Re.MatchString(l.Fire) || !hex8Re.MatchString(l.Sub) ||
+		(l.Phase != FirePhaseStarted && l.Phase != FirePhaseResult) {
+		return l, false
+	}
+	return l, true
+}
+
+// fireRecordLines returns record with every line that is not a record
+// line taken out, and how many were. The lines kept are as they were
+// written. Harvest carries a record into another store through this, so
+// that what arrives there is fire record lines and nothing else.
+func fireRecordLines(record []byte) (kept []byte, dropped int) {
+	kept = []byte{}
+	for _, raw := range bytes.Split(record, []byte{'\n'}) {
+		if len(bytes.TrimSpace(raw)) == 0 {
+			continue
+		}
+		if _, ok := parseFireLine(raw); !ok {
+			dropped++
+			continue
+		}
+		kept = append(append(kept, raw...), '\n')
+	}
+	return kept, dropped
+}
+
 // readFiresFile returns the bytes of the item's fires file, and false
 // when the item has none. Reading creates nothing.
 //
@@ -126,9 +163,9 @@ func (s *FileStore) readFiresFile(id string) ([]byte, bool, error) {
 // has none, and nothing is created on disk.
 //
 // The record is read from disk, not trusted. A line that is not a record
-// line in a known version, a started line whose ids are not in the
-// generated shape or that repeats a fire id, and a result line that pairs
-// with no started line are left out; skipped counts them. A fire's first
+// line (see parseFireLine), a started line that repeats a fire id, and a
+// result line that pairs with no started line are left out; skipped counts
+// them. A fire's first
 // result line is the one reported.
 func (s *FileStore) LoadFires(id string) (fires []Fire, skipped int, err error) {
 	b, ok, err := s.readFiresFile(id)
@@ -141,8 +178,8 @@ func (s *FileStore) LoadFires(id string) (fires []Fire, skipped int, err error) 
 		if len(bytes.TrimSpace(raw)) == 0 {
 			continue
 		}
-		var l fireRecordLine
-		if json.Unmarshal(raw, &l) != nil || l.V != FireRecordVersion || !hex8Re.MatchString(l.Fire) || !hex8Re.MatchString(l.Sub) {
+		l, ok := parseFireLine(raw)
+		if !ok {
 			skipped++
 			continue
 		}
@@ -168,8 +205,6 @@ func (s *FileStore) LoadFires(id string) (fires []Fire, skipped int, err error) 
 			ts, ms := l.Ts.UTC(), l.DurationMs
 			f.FinishedAt, f.DurationMs = &ts, &ms
 			f.State, f.ExitCode, f.Detail, f.Output = l.State, l.ExitCode, l.Detail, l.Output
-		default:
-			skipped++
 		}
 	}
 	return fires, skipped, nil

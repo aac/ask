@@ -220,7 +220,9 @@ func formatSubscription(s core.Subscription) string {
 	}
 	sort.Strings(keys)
 	var b strings.Builder
-	fmt.Fprintf(&b, "%s %s on %s", s.ID, s.Handler, strings.Join(s.Events, ","))
+	// The subs file is read from disk and can have come from another
+	// store, so what it holds is kept to its line (see oneLine).
+	fmt.Fprintf(&b, "%s %s on %s", oneLine(s.ID), oneLine(s.Handler), oneLine(strings.Join(s.Events, ",")))
 	for _, k := range keys {
 		fmt.Fprintf(&b, " %s=%q", k, s.Args[k])
 	}
