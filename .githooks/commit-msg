@@ -78,7 +78,7 @@ Allowed on main without the bypass:
   - merges in progress (MERGE_HEAD set; e.g. orchestrator ff-merges)
   - commits on any branch other than main
 
-Bypass (use sparingly, e.g. when Andrew is hand-editing on main):
+Bypass (use sparingly, e.g. when a maintainer is hand-editing on main):
   ASK_ALLOW_DIRECT_MAIN=1 git commit ...
 
 Hook: .githooks/commit-msg (act-9df9)

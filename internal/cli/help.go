@@ -24,7 +24,8 @@ Commands:
   harvest        Copy items from a worktree's .ask/ into this store
                  (for orchestrators surfacing worktree-filed asks).
   mcp            Start MCP server on stdio.
-  help [topic]   Show this help, or a topic: workflow, verifier, mcp, schema.
+  help [topic]   Show this help, or a topic: workflow, verifier, mcp, schema,
+                 callbacks.
   version        Print binary version.
 
 First time? See README.md for setup. The ask skill ships with the plugin
@@ -42,7 +43,7 @@ func runHelp(args []string) int {
 	topic := args[0]
 	body, ok := helpTopics[topic]
 	if !ok {
-		fmt.Fprintf(os.Stderr, "ask: unknown help topic %q. Known: workflow, verifier, mcp, schema.\n", topic)
+		fmt.Fprintf(os.Stderr, "ask: unknown help topic %q. Known: workflow, verifier, mcp, schema, callbacks.\n", topic)
 		return 2
 	}
 	fmt.Println(body)

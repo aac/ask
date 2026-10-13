@@ -75,7 +75,19 @@ Resolving already encodes "the human said done." Add `--note` only for context w
 
 ## Agent-to-agent asks
 
-ask is human-recipient by default; items without `--recipient` target the implicit human. When the consumer is another agent (a cron-driven loop, a sibling process, a service-account poll), set `--recipient <kind>:<identifier>` so it can scope its poll with `ask list --recipient <ref>`. Examples: `agent:data-prep`, `agent:reviewer-bot`, `human:alex`, `team:reviewers`. ask never interprets the tag — it's opaque; the kind prefix is convention only. Skip the flag for the common single-human case. ask is pull-based (no delivery or notification); `resolve`/`reopen`/`close` behave identically regardless of recipient.
+ask is human-recipient by default; items without `--recipient` target the implicit human. When the consumer is another agent (a cron-driven loop, a sibling process, a service-account poll), set `--recipient <kind>:<identifier>` so it can scope its poll with `ask list --recipient <ref>`. Examples: `agent:data-prep`, `agent:reviewer-bot`, `human:alex`, `team:reviewers`. ask never interprets the tag — it's opaque; the kind prefix is convention only. Skip the flag for the common single-human case. ask is pull-based: it delivers nothing to a recipient, and `resolve`/`reopen`/`close` behave identically regardless of recipient. A party that wants to be told when an item changes subscribes a handler to it (§Callbacks).
+
+## Callbacks: being told when an item changes
+
+`ask subscribe <id> --on resolve,close,reopen --handler <name> [--arg key=value ...]` stores "when this item changes, run this handler"; `--on any` is all three. Use it when something other than the filing agent has to react to the change and would otherwise poll forever (a comment that should be followed up, a thread that should be told). The filing agent's own loop still polls; do not subscribe just to avoid `ask list`.
+
+- A handler is an executable the human installed at `~/.config/ask/callbacks/<name>` on the host where the store lives. `subscribe` refuses an unknown name and lists the installed ones. Do not write handlers into that directory on your own initiative: a handler is code that runs unattended with the human's account.
+- Read the exit code. `0` stored. `8` stored, but the item is already resolved, so the event you subscribed for has happened: read the item now. `6` an identical subscription exists. `2` the item is closed, or the handler or an argument was refused; nothing stored.
+- `--arg` values are stored in plain text and handed to the handler as `ASK_ARG_<KEY>`. Pass identifiers (a thread id, a channel), never a secret.
+- A handler runs at most once per change and is never retried, and its output is stored and shown by `ask fires`. `ask show <id>` says under each subscription what its last fires did, including `missed` when an older ask that does not fire changed the item. If the change matters, check `ask show` instead of assuming the handler ran.
+- `subscribe`, `unsubscribe` and `fires` are CLI-only; there are no MCP tools for them. A resolve, close or reopen made through the MCP tools fires subscriptions all the same.
+
+Mechanics and the handler contract: `ask help callbacks`.
 
 ## Listing and polling: an empty list may be partial
 

@@ -4,18 +4,22 @@ package cli
 // Each entry is plain text intended for terminal display. The dispatcher
 // in help.go exits 2 when an unknown topic is requested.
 var helpTopics = map[string]string{
-	"workflow": workflowTopic,
-	"verifier": verifierTopic,
-	"mcp":      mcpTopic,
-	"schema":   schemaTopic,
+	"workflow":  workflowTopic,
+	"verifier":  verifierTopic,
+	"mcp":       mcpTopic,
+	"schema":    schemaTopic,
+	"callbacks": callbacksTopic,
 }
 
 const workflowTopic = `ask help workflow — state transitions and the agent contract
 
 ask is a state store. Items move through three states: open, resolved,
 closed. Every CLI verb (and every MCP tool) is one transition on the
-state machine. ask itself never runs verifiers, never polls, and never
-notifies — agents and orchestrators drive everything around it.
+state machine. ask itself never runs verifiers and never polls. The one
+thing it runs is a callback: when an item is resolved, closed or
+reopened, ask runs a subscribed handler for each subscription that names
+that change (ask help callbacks). Agents and orchestrators drive
+everything else around it.
 
 States
   open      Filed and awaiting human action.
@@ -60,7 +64,20 @@ Cross-store move
                              unreadable one (exit 5, each id named)
                              copies nothing; --clean removes source
                              items after a successful copy so re-running
-                             is a clean no-op.
+                             is a clean no-op. An item's subscriptions
+                             and its fire record travel with it.
+
+Callbacks (no transition)
+  ask subscribe <id> --on <event>[,<event>] --handler <name>
+                [--arg key=value ...]
+                             Store "when this item is resolved, closed
+                             or reopened, run this handler". Never runs
+                             the handler itself.
+  ask unsubscribe <id> <subscription-id>
+                             Remove one subscription.
+  ask fires [<id>]           Show what the handlers did, with the output
+                             each one printed.
+  See ask help callbacks.
 
 Transition matrix
   From         resolve                       reopen                       close
@@ -95,8 +112,9 @@ Verifier cwd/timeout semantics (for the agent that runs the verifier)
     because it surfaces the broken verifier to the human.
 
 Orchestrator checkpoint convention
-  ask has no event bus. Orchestrators that want to react to ask state
-  must poll. The recommended cadence:
+  ask has no event bus. An orchestrator that wants to react to ask
+  state polls, or subscribes a handler to the items it is waiting on
+  (ask help callbacks). The recommended polling cadence:
     - Before claiming new work in a long loop:
         ask list --status=open --urgency=blocker --strict
       If non-empty, halt or address. --strict makes the exit 5 when
@@ -208,11 +226,15 @@ job, like any other test in the project.
 const mcpTopic = `ask help mcp — MCP tools and an example transcript
 
 ask mcp starts a stdio JSON-RPC 2.0 server speaking MCP protocol
-2024-11-05. Server name: ask-mcp. The server exposes one tool per CLI
-verb an agent uses on an item (init and harvest are developer actions
-on the store, not agent actions, and stay CLI-only).
+2024-11-05. Server name: ask-mcp. The server exposes seven tools, one
+for each verb an agent uses on an item in the middle of its own loop:
+ask_new, ask_list, ask_show, ask_update, ask_resolve, ask_reopen and
+ask_close. The verbs that set up or administer a store or its callbacks
+(init, harvest, subscribe, unsubscribe, fires) are CLI-only.
 Tool shapes mirror the CLI flags; semantics are identical in both
-directions.
+directions, callbacks included: a status change made through a tool
+runs the handlers subscribed to it exactly as the CLI verb does, and the
+tool's result does not change (ask help callbacks).
 
 Flags
   --workdir <path>   chdir to <path> before serving. Useful on Codex
@@ -507,7 +529,7 @@ ProjectConfig (.ask/config.json)
     "project_id":   "01HXYZ...",                // ULID, generated on
                                                 // init. Opaque, stable
                                                 // across renames/moves.
-    "display_name": "inbox-triage",             // defaults to repo
+    "display_name": "my-project",               // defaults to repo
                                                 // basename; editable.
     "created_at":   "2026-05-15T10:30:00Z"
   }
@@ -515,4 +537,122 @@ ProjectConfig (.ask/config.json)
 project_id is the input to the id hash and is the only stable handle on
 a project. display_name is what UIs render; renaming the directory does
 not change project_id.
+`
+
+const callbacksTopic = `ask help callbacks — run a handler when an item changes
+
+A subscription says: when this item is resolved, closed or reopened, run
+this handler. It lets a party other than the one that filed an item be
+told when the item changes, without polling. ask stores subscriptions
+beside the item, and the command that changes the item starts the
+handlers and does not wait for them.
+
+Verbs (CLI-only; there are no MCP tools for these)
+  ask subscribe <id> --on <event>[,<event>] --handler <name>
+                [--arg key=value ...] [--json]
+      Events: resolve (open -> resolved), close (anything -> closed),
+      reopen (resolved -> open), or any for all three. Stores the
+      subscription and prints the item's current status. It never runs
+      the handler. --arg is repeatable: at most 16, key matching
+      ^[a-z][a-z0-9_]{0,31}$, value at most 1024 bytes. An item holds at
+      most 32 subscriptions.
+      Exit: 0 stored. 8 stored, but the item is already resolved and the
+      subscription names resolve, so nothing fires unless the item is
+      reopened and resolved again. 6 an identical subscription exists;
+      nothing added. 2 the item is closed (it never changes again), or a
+      bad or unknown handler name, or a bad argument; nothing stored.
+  ask unsubscribe <id> <subscription-id> [--json]
+      Removes one subscription. The id is the 8-hex id ask show lists;
+      any unambiguous prefix will do. Exit 3 not found, 4 ambiguous.
+  ask fires [<id>] [--json]
+      What the handlers did: one block per fire, oldest first, with the
+      output each handler printed. Without an id, every fire in the
+      store. --json is an array of {item, fire, sub, handler, event,
+      from, to, at, started_at, finished_at, state, exit_code, detail,
+      duration_ms, output}; a fire that has not finished has state
+      "started". No fires is [] and exit 0.
+  ask show <id>
+      Lists each subscription and, under it, its last 3 fires in words:
+        <time>  resolve   ok, exit 0 in 0.4 s
+        <time>  resolve   failed, exit 22 in 7.2 s
+        <time>  resolve   not run: no handler named <name> on this machine
+        <time>  resolve   killed at the 60 s timeout
+        <time>  resolve   started, no result after <age> (it is running)
+        not fired yet: no resolve since this was added
+        missed: resolve at <time> by a build that does not fire; not retried
+      It never prints a handler's output; ask fires does.
+
+Handlers
+  A handler is an executable file at ~/.config/ask/callbacks/<name>, on
+  the host where the store lives. The name matches
+  ^[a-z0-9][a-z0-9_-]{0,63}$. ask subscribe refuses a name with no
+  executable behind it and lists the handlers that are installed.
+
+  What a handler is run with:
+    working directory  the project root (the directory holding .ask/)
+    environment        built, not inherited. Exactly:
+                         PATH=/usr/bin:/bin:<ask's directory>:$HOME/.local/bin
+                         HOME, LANG
+                         ASK_ID, ASK_EVENT, ASK_SUB_ID, ASK_FIRE_ID,
+                         ASK_FROM_STATUS, ASK_TO_STATUS, ASK_AT,
+                         ASK_STORE (the project root)
+                         ASK_ARG_<KEY> for each --arg, key upper-cased
+                       Nothing else from the process that changed the
+                       item reaches the handler.
+    standard input     one JSON object: {item, event, from, to, at,
+                       args}. item is the Item as the store holds it.
+    time               60 seconds. Then the handler and everything it
+                       started are killed.
+
+  What a handler can rely on, and what it cannot:
+    - It runs at most once per subscription per change. It is never
+      retried: not after a failure, not after a timeout, not if the
+      machine went down while it ran. Whoever cannot afford to miss a
+      change should not rely on the handler alone: poll as well, or
+      check ask fires.
+    - Its exit code and the last 4096 bytes of what it wrote to stdout
+      and stderr are stored in the store and shown by ask fires to
+      anyone who can read the store: never print a secret.
+    - It cannot fail, delay or change the write that fired it. The
+      resolve, close or reopen has already happened and has already
+      returned.
+    - A change that is a no-op (exit 6) fires nothing, and neither does
+      ask update.
+
+  Keep a handler's own settings out of the callbacks directory, where
+  every file is a handler. The convention is
+  ~/.config/ask/callback-config/<name>.env, mode 0600, read by the
+  handler itself. ask does not read it.
+
+  Example: a handler that records every change it is told about.
+
+    $ mkdir -p ~/.config/ask/callbacks
+    $ cat > ~/.config/ask/callbacks/record <<'EOF'
+    #!/bin/sh
+    # stdin is the JSON payload, on one line with no newline after it.
+    { cat; echo; } >> "$HOME/ask-changes.jsonl"
+    echo "recorded $ASK_EVENT of $ASK_ID"
+    EOF
+    $ chmod +x ~/.config/ask/callbacks/record
+    $ ask subscribe ask-3c89 --on any --handler record --arg thread=abc
+    ask-3c89: subscribed 6d69ca27 (resolve,close,reopen -> record); status open
+    $ ask resolve ask-3c89
+    $ ask fires ask-3c89
+
+Where it lives
+  .ask/subs/<id>.json    an item's subscriptions. Removed with the last.
+  .ask/fires/<id>.jsonl  an item's fire record: two lines per fire, a
+                         started line and a result line. Mode 0600.
+  ask harvest carries both with the item. A carried fire record is the
+  source store's account of what ran; harvest does not check it.
+
+Older builds
+  A build of ask from before callbacks leaves subscriptions on disk and
+  fires nothing: a long-running ask mcp server started before an upgrade
+  is such a build until it is restarted. ask show reports a resolve or
+  close made that way as missed. A missed reopen cannot be detected,
+  because a reopen stamps no time on the item.
+
+Full contract: docs/spec.md §14. A longer guide to writing a handler:
+docs/callbacks.md.
 `

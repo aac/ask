@@ -98,6 +98,32 @@ Codex, custom SDK apps) can drive the loop through tool calls instead of shellin
 CLI is always available as the base surface: every operation is an `ask` subcommand, so any
 agent that can run a shell command drives the full loop with no extra setup.
 
+A few verbs are CLI-only because they set up or administer a store rather than act on an
+item mid-loop: `init`, `harvest`, and the callback verbs `subscribe`, `unsubscribe` and
+`fires` (next section).
+
+## Callbacks: being told when an item changes
+
+ask is pull-based: whoever waits on an item polls it. For a third party that would
+otherwise poll forever, ask can run a handler when an item is resolved, closed or reopened:
+
+```sh
+ask subscribe ask-3c89 --on resolve --handler notify --arg channel=ops
+ask show ask-3c89       # lists the subscription and what its last fires did
+ask fires ask-3c89      # every run of a handler for this item, with its output
+```
+
+A handler is an executable you install at `~/.config/ask/callbacks/<name>` on the host where
+the store lives. The command that changes the item does not wait for it. ask runs it with a
+built environment (the `ASK_*` variables, nothing inherited) and the item as JSON on stdin,
+gives it 60 seconds, runs it at most once and never retries it. Its exit code and the last
+4096 bytes of its output are stored in the store and shown by `ask fires`, so a handler
+should never print a secret. This is the only thing ask executes; it still never runs a
+verifier and never polls.
+
+`ask help callbacks` has the contract in brief; [`docs/callbacks.md`](docs/callbacks.md) is
+the guide to writing a handler.
+
 An opinionated skill ships with the plugin and installs to `skills/ask/SKILL.md`. It fires
 when `.ask/` is present, when the user mentions phrases like "what's in my inbox" or
 `ask-XXXX` ids, or when the agent is already using ask MCP tools. The skill layers
@@ -208,7 +234,8 @@ range of projects. The CLI, MCP server, skill, and install path are all in place
 and the bare binary). Codesigning and notarization of the macOS binary are still to come.
 
 Design & internals: [`docs/spec.md`](docs/spec.md) is the authoritative implementation
-contract — field types, error shapes, exit codes, JSON shapes.
+contract — field types, error shapes, exit codes, JSON shapes, and the callback contract
+(§14).
 
 ## Uninstall
 
