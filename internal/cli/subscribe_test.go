@@ -494,12 +494,13 @@ func TestShowSubscriptions(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("show: exit %d", code)
 	}
-	want := fmt.Sprintf("\nSubscriptions:\n  - %s rec on resolve,reopen thread=\"abc def\" added %s\n",
+	want := fmt.Sprintf("\nSubscriptions:\n  - %s rec on resolve,reopen thread=\"abc def\" added %s\n"+
+		"      not fired yet: no resolve or reopen since this was added\n",
 		sub.ID, sub.AddedAt.UTC().Format(time.RFC3339))
 	if !strings.HasSuffix(out, want) {
 		t.Errorf("show output:\n%s\nwant it to end with:\n%s", out, want)
 	}
-	if !regexp.MustCompile(`added \d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ\n$`).MatchString(out) {
+	if !regexp.MustCompile(`added \d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ\n`).MatchString(out) {
 		t.Errorf("added time is not RFC 3339 UTC: %q", out)
 	}
 }

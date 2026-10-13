@@ -29,17 +29,18 @@ var ErrUnreadableSource = errors.New("unreadable source item(s)")
 // harvested ask would be unreadable in the target (act-f9ab23). The
 // same holds for the target's subs directory and the subs file of a
 // source item that has subscriptions; such a file is named as
-// subs/<file> (act-48158e). The message names each such file; neither
-// store is mutated.
+// subs/<file> (act-48158e). And for the target's fires directory and the
+// fires file of a source item that has one, named as fires/<file>. The
+// message names each such file; neither store is mutated.
 var ErrStrayTarget = errors.New("target file differs from a source item's only in case")
 
 // strayTargetTwins returns one "<label><file> (source <id>)" entry for
-// every name in target's subdir (items or subs) that a source id's file
-// name matches under case folding but not exactly. It compares names and
+// every name in target's subdir (items, subs or fires) that a source id's
+// file name (<id><ext>) matches under case folding but not exactly. It compares names and
 // never probes the filesystem, so the answer is the same whether or not
 // the filesystem folds case. Directories count: a name is in the way
 // whatever it names.
-func strayTargetTwins(target *FileStore, subdir, label string, srcIDs []string) ([]string, error) {
+func strayTargetTwins(target *FileStore, subdir, label, ext string, srcIDs []string) ([]string, error) {
 	entries, err := os.ReadDir(filepath.Join(target.root, subdir))
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
@@ -50,7 +51,7 @@ func strayTargetTwins(target *FileStore, subdir, label string, srcIDs []string) 
 	var twins []string
 	for _, e := range entries {
 		for _, id := range srcIDs {
-			if want := id + ".json"; e.Name() != want && strings.EqualFold(e.Name(), want) {
+			if want := id + ext; e.Name() != want && strings.EqualFold(e.Name(), want) {
 				twins = append(twins, fmt.Sprintf("%s%s (source %s)", label, e.Name(), id))
 			}
 		}
@@ -110,11 +111,14 @@ type HarvestResult struct {
 //     file claiming another id would otherwise be written wherever its
 //     contents say (act-7ee74d).
 //     Each item's subscriptions (.ask/subs/<id>.json) are read in the same
-//     pass; an unreadable subs file fails the harvest the same way.
+//     pass; an unreadable subs file fails the harvest the same way. So is
+//     its fire record (.ask/fires/<id>.jsonl), and so does that fail it.
 //   - Copy pass: each loaded item is Save'd to target, then its
-//     subscriptions, if it has any.
+//     subscriptions, if it has any, then its fire record, if it has one,
+//     byte for byte. Without the record, an item whose handler ran would
+//     read in the target as one whose fire was missed.
 //   - Optional cleanup: when clean is true, after every copy succeeds the
-//     source files (item and subscriptions) are removed — by the id each file was listed under,
+//     source files (item, subscriptions and fire record) are removed — by the id each file was listed under,
 //     never by an id read out of its contents. The two passes are ordered (all writes
 //     first, then all deletes) so a copy failure never leaves a source
 //     item deleted without a corresponding target copy.
@@ -152,7 +156,7 @@ func Harvest(target, source *FileStore, clean bool) (*HarvestResult, error) {
 			collisions = append(collisions, id)
 		}
 	}
-	twins, err := strayTargetTwins(target, itemsSubdir, "", srcIDs)
+	twins, err := strayTargetTwins(target, itemsSubdir, "", ".json", srcIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -167,7 +171,9 @@ func Harvest(target, source *FileStore, clean bool) (*HarvestResult, error) {
 	items := make([]*Item, 0, len(srcIDs))
 	subs := make([]*SubsFile, 0, len(srcIDs))
 	var unreadable unreadableItems
-	var subbed []string // readable source ids that have subscriptions
+	fires := make([][]byte, 0, len(srcIDs)) // nil for an item with no fire record
+	var subbed []string                     // readable source ids that have subscriptions
+	var fired []string                      // readable source ids that have a fire record
 	for _, id := range srcIDs {
 		if checkID(id) != nil {
 			// A stray: its name is not an id, so the report names the
@@ -186,19 +192,36 @@ func Harvest(target, source *FileStore, clean bool) (*HarvestResult, error) {
 			unreadable = append(unreadable, fmt.Errorf("%s: %w", id, err))
 			continue
 		}
+		record, hasRecord, err := source.readFiresFile(id)
+		if err != nil {
+			unreadable = append(unreadable, fmt.Errorf("%s: %w", id, err))
+			continue
+		}
+		if hasRecord {
+			// Never nil for a record that exists, even an empty one: nil
+			// is how the passes below know there is none.
+			record = append([]byte{}, record...)
+			fired = append(fired, id)
+		}
 		items = append(items, it)
 		subs = append(subs, f)
+		fires = append(fires, record)
 		if len(f.Subscriptions) > 0 {
 			subbed = append(subbed, id)
 		}
 	}
 	// Only a subs file the copy pass would write can land in a stray: an
 	// item with no subscriptions writes nothing under subs/.
-	subsTwins, err := strayTargetTwins(target, subsSubdir, subsSubdir+"/", subbed)
+	subsTwins, err := strayTargetTwins(target, subsSubdir, subsSubdir+"/", ".json", subbed)
 	if err != nil {
 		return nil, err
 	}
 	twins = append(twins, subsTwins...)
+	firesTwins, err := strayTargetTwins(target, firesSubdir, firesSubdir+"/", ".jsonl", fired)
+	if err != nil {
+		return nil, err
+	}
+	twins = append(twins, firesTwins...)
 	var refusal error
 	switch {
 	case len(collisions) > 0 && len(unreadable) > 0:
@@ -233,11 +256,16 @@ func Harvest(target, source *FileStore, clean bool) (*HarvestResult, error) {
 				return nil, fmt.Errorf("write target subscriptions %s: %w", srcIDs[i], err)
 			}
 		}
+		if fires[i] != nil {
+			if err := target.writeFiresFile(srcIDs[i], fires[i]); err != nil {
+				return nil, fmt.Errorf("write target fire record %s: %w", srcIDs[i], err)
+			}
+		}
 	}
 	harvested := append([]string{}, srcIDs...)
 
 	if clean {
-		for _, id := range harvested {
+		for i, id := range harvested {
 			path, err := source.itemPath(id)
 			if err != nil {
 				return nil, fmt.Errorf("cleanup source: %w", err)
@@ -251,6 +279,17 @@ func Harvest(target, source *FileStore, clean bool) (*HarvestResult, error) {
 			}
 			if err := os.Remove(subsPath); err != nil && !errors.Is(err, os.ErrNotExist) {
 				return nil, fmt.Errorf("cleanup source subscriptions %s: %w", id, err)
+			}
+			// Only a record that was read, and so copied, is removed.
+			if fires[i] == nil {
+				continue
+			}
+			firesPath, err := source.firesPath(id)
+			if err != nil {
+				return nil, fmt.Errorf("cleanup source: %w", err)
+			}
+			if err := os.Remove(firesPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+				return nil, fmt.Errorf("cleanup source fire record %s: %w", id, err)
 			}
 		}
 	}
