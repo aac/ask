@@ -199,12 +199,15 @@ func fireAge(d time.Duration) string {
 }
 
 // oneLine makes a string read from a fire record safe to put inside a
-// line of text: control characters become spaces and anything past 200
-// bytes is cut. The record is a file on disk, and its detail can be an
-// operating system's error message.
+// line of text: every character that is not printable becomes a space,
+// and anything past 200 bytes is cut. That takes out control characters
+// and escape sequences, and also the invisible ones that would reorder or
+// hide the text around them (direction overrides, zero-width characters,
+// line and paragraph separators). The record is a file on disk, and its
+// detail can be an operating system's error message.
 func oneLine(s string) string {
 	s = strings.Map(func(r rune) rune {
-		if unicode.IsControl(r) || r == utf8.RuneError {
+		if !unicode.IsPrint(r) || r == utf8.RuneError {
 			return ' '
 		}
 		return r
@@ -221,15 +224,16 @@ func oneLine(s string) string {
 }
 
 // printable is a handler's stored output as `ask fires` prints it: line
-// breaks and tabs kept, every other control character replaced, so stored
-// output cannot drive the terminal it is read on. --json carries the
-// output as stored.
+// breaks and tabs kept, every other character that is not printable
+// replaced as in oneLine, so stored output cannot drive, reorder or hide
+// what is on the terminal it is read on. --json carries the output as
+// stored.
 func printable(s string) string {
 	return strings.Map(func(r rune) rune {
 		switch {
 		case r == '\n' || r == '\t':
 			return r
-		case unicode.IsControl(r) || r == utf8.RuneError:
+		case !unicode.IsPrint(r) || r == utf8.RuneError:
 			return ' '
 		}
 		return r
