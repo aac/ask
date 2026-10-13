@@ -111,9 +111,12 @@ func runSubscribe(args []string) int {
 	}
 
 	it, sub := res.Item, res.Subscription
+	// An existing subscription was read from the subs file, a file on
+	// disk: its id is kept to its line where it is printed as text.
+	subID := oneLine(sub.ID)
 	resolvedAlready := it.Status == core.StatusResolved && sub.Names(core.EventResolve)
 	if res.Existing {
-		fmt.Fprintf(os.Stderr, "ask subscribe: %s already has this subscription (%s); nothing was added\n", it.ID, sub.ID)
+		fmt.Fprintf(os.Stderr, "ask subscribe: %s already has this subscription (%s); nothing was added\n", it.ID, subID)
 	}
 	if resolvedAlready {
 		fmt.Fprintf(os.Stderr, "ask subscribe: %s is already resolved; the subscription is stored and fires if the item is reopened and resolved again\n", it.ID)
@@ -126,7 +129,7 @@ func runSubscribe(args []string) int {
 			state = "already subscribed"
 		}
 		fmt.Printf("%s: %s %s (%s -> %s); status %s\n",
-			it.ID, state, sub.ID, strings.Join(sub.Events, ","), sub.Handler, it.Status)
+			it.ID, state, subID, strings.Join(sub.Events, ","), sub.Handler, it.Status)
 	}
 	switch {
 	case resolvedAlready:
@@ -193,7 +196,8 @@ func runUnsubscribe(args []string) int {
 	}
 	id, removed, err := store.Unsubscribe(fs.Arg(0), subPrefix)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "ask unsubscribe: %v\n", err)
+		// The message can name stored subscription ids.
+		fmt.Fprintf(os.Stderr, "ask unsubscribe: %s\n", cleanText(err.Error()))
 		switch {
 		case errors.Is(err, core.ErrSubNotFound):
 			return 3
@@ -205,7 +209,7 @@ func runUnsubscribe(args []string) int {
 	if *asJSON {
 		emitJSON(unsubscribeJSONOutput{ID: id, Unsubscribed: *removed})
 	} else {
-		fmt.Printf("%s: unsubscribed %s\n", id, removed.ID)
+		fmt.Printf("%s: unsubscribed %s\n", id, oneLine(removed.ID))
 	}
 	return 0
 }
@@ -224,7 +228,7 @@ func formatSubscription(s core.Subscription) string {
 	// store, so what it holds is kept to its line (see oneLine).
 	fmt.Fprintf(&b, "%s %s on %s", oneLine(s.ID), oneLine(s.Handler), oneLine(strings.Join(s.Events, ",")))
 	for _, k := range keys {
-		fmt.Fprintf(&b, " %s=%q", k, s.Args[k])
+		fmt.Fprintf(&b, " %s=%q", oneLine(k), s.Args[k])
 	}
 	fmt.Fprintf(&b, " added %s", s.AddedAt.UTC().Format(time.RFC3339))
 	return b.String()

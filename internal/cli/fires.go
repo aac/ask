@@ -198,20 +198,27 @@ func fireAge(d time.Duration) string {
 	return fmt.Sprintf("%d d", int(d/(24*time.Hour)))
 }
 
-// oneLine makes a string read from a fire record safe to put inside a
-// line of text: every character that is not printable becomes a space,
-// and anything past 200 bytes is cut. That takes out control characters
-// and escape sequences, and also the invisible ones that would reorder or
-// hide the text around them (direction overrides, zero-width characters,
-// line and paragraph separators). The record is a file on disk, and its
-// detail can be an operating system's error message.
-func oneLine(s string) string {
-	s = strings.Map(func(r rune) rune {
+// cleanText replaces every character of s that is not printable with a
+// space. That takes out control characters and escape sequences, and also
+// the invisible ones that would reorder or hide the text around them
+// (direction overrides, zero-width characters, line and paragraph
+// separators). It is for text read from a file in the store on its way to
+// a terminal.
+func cleanText(s string) string {
+	return strings.Map(func(r rune) rune {
 		if !unicode.IsPrint(r) || r == utf8.RuneError {
 			return ' '
 		}
 		return r
 	}, s)
+}
+
+// oneLine makes a string read from a fire record or a subs file safe to
+// put inside a line of text: cleanText, and anything past 200 bytes is
+// cut. Those are files on disk, and a fire's detail can be an operating
+// system's error message.
+func oneLine(s string) string {
+	s = cleanText(s)
 	const max = 200
 	if len(s) > max {
 		cut := max
