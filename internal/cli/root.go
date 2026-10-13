@@ -14,6 +14,7 @@ var commands = map[string]commandFunc{
 	"new":         runNew,
 	"list":        runList,
 	"show":        runShow,
+	"fires":       runFires,
 	"update":      runUpdate,
 	"subscribe":   runSubscribe,
 	"unsubscribe": runUnsubscribe,
