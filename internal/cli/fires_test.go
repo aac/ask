@@ -559,3 +559,37 @@ func TestShowKeepsAStoredSubscriptionToItsLine(t *testing.T) {
 		t.Errorf("show does not print the subscription on one line:\n%q", out)
 	}
 }
+
+// TestStoredSubscriptionFieldsNeverReachTheTerminalRaw: every field of a
+// stored subscription that `show`, `subscribe` and `unsubscribe` print in
+// text comes from a file on disk. An id that goes on past its eight hex
+// characters, and an argument key, are kept to their line like the rest.
+func TestStoredSubscriptionFieldsNeverReachTheTerminalRaw(t *testing.T) {
+	dir, id, _ := firesSubscribed(t, "resolve")
+	plant := func(t *testing.T) {
+		t.Helper()
+		body := fmt.Sprintf(`{"schema_version":"1","item":%q,"subscriptions":[`+
+			`{"id":"aaaaaaaa\u001b[2J\u202e","events":["resolve"],"handler":"rec","args":{"k\u001b[1m\nforged":"v"},"added_at":"2026-01-01T00:00:00Z"},`+
+			`{"id":"aaaabbbb\u001b[2J","events":["close"],"handler":"rec","args":{},"added_at":"2026-01-01T00:00:00Z"}]}`, id)
+		if err := os.WriteFile(subsFilePath(dir, id), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	raw := func(s string) bool {
+		return strings.ContainsRune(s, 0x1b) || strings.ContainsRune(s, 0x202e) || strings.Contains(s, "\nforged")
+	}
+	plant(t)
+	for _, args := range [][]string{
+		{"show", id},
+		// Identical to the second stored subscription: reported as existing, by its stored id.
+		{"subscribe", id, "--on", "close", "--handler", "rec"},
+		// Ambiguous: the message names both stored ids.
+		{"unsubscribe", id, "aaaa"},
+		{"unsubscribe", id, "aaaaa"},
+	} {
+		code, out, errOut := subsRun(t, args...)
+		if raw(out) || raw(errOut) {
+			t.Errorf("ask %s (exit %d) printed a stored field raw:\nstdout %q\nstderr %q", strings.Join(args, " "), code, out, errOut)
+		}
+	}
+}
