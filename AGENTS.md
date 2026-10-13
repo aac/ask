@@ -25,6 +25,9 @@ rules, and move it when you find it misfiled:
 - **`README.md`** — what ask is and how to install it, for a new adopter.
 - **`docs/spec.md`** — the authoritative implementation contract: field types, error shapes,
   exit codes, JSON shapes. Read it when implementing anything that touches the wire format.
+- **`docs/callbacks.md`** — how to write a callback handler, for the person installing one.
+  The contract it rests on is spec §14; `ask help callbacks` is the in-binary summary. A
+  change to what a handler is run with touches all three.
 
 ## Project specifics
 
@@ -38,11 +41,19 @@ rules, and move it when you find it misfiled:
   pattern — the MCP tools mirror the CLI's lifecycle verbs (`ask_new`, `ask_list`, …).
   The rule for a new verb: it gets an MCP twin when it is something an agent does to an
   existing item in the middle of its own loop (file, read, correct, transition); verbs
-  that set up or administer a store (`init`, `harvest`) stay CLI-only. `ask_update` is the
+  that set up or administer a store or its callbacks (`init`, `harvest`, `subscribe`,
+  `unsubscribe`, `fires`) stay CLI-only. `ask_update` is the
   worked case: agents drive ask through MCP more than the shell, and without the twin the
   only way to correct a rotted ask from there was hand-editing `.ask/items/<id>.json` —
   the failure `ask update` was built to remove. The counter-pressure is a small tool
   surface: a new verb has to pass that test, it does not get a twin automatically.
+- **A handler is the only thing ask executes, and the tests for it run a real binary.** A
+  fire re-executes the running binary as a detached runner, which under `go test` would be
+  the test binary, so the firing tests (`internal/cli/fire_boundary_test.go`) build ask
+  from the current source once and drive it as a subprocess with `HOME` pointed at a temp
+  directory. Anything `ask show` or `ask fires` prints as text from a subs file or a fire
+  record goes through `oneLine` / `cleanText` first: those are files on disk, and
+  `ask harvest` can bring them in from another store.
 - **This repo dogfoods ask on its own backlog.** Mid-flight discoveries about ask itself are
   common; file them and keep working — that's the dogfood signal.
 - **The skill tree is plain files at `skills/ask/`**, shipped with the plugin and

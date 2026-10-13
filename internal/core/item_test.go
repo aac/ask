@@ -255,7 +255,7 @@ func TestItemSchemaVersionWrittenByNewItem(t *testing.T) {
 // backward-compat read path: an item written before the field existed
 // (i.e. with no schema_version key at all in its JSON) loads silently
 // with SchemaVersion = "1". This is the load-bearing tolerance — the
-// dogfood store on Andrew's laptop has dozens of these items today.
+// dogfood store on a maintainer's laptop has dozens of these items today.
 func TestItemUnmarshalMissingSchemaVersionDefaultsToOne(t *testing.T) {
 	raw := []byte(`{
 		"id":"ask-3c89","title":"x","body":"","urgency":"normal","status":"open",

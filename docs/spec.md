@@ -155,7 +155,7 @@ Rules:
 | Field | Type | Required | Constraints |
 |---|---|---|---|
 | `type` | string | yes | v1 accepts only `"shell"`. `"url"` and `"mcp"` are reserved values and **must be rejected** by `ask new` validation in v1. |
-| `command` | string | yes | 1..4096 chars; passed to the user's shell by the agent that runs the verifier (ask itself never executes it in v1) |
+| `command` | string | yes | 1..4096 chars; passed to the user's shell by the agent that runs the verifier (ask itself never executes it in v1; the only thing ask executes is a subscribed handler, §14) |
 | `timeout_seconds` | integer | yes | 1..3600; default 60 when verifier supplied without explicit timeout |
 
 The default is applied when the item is created: `ask new --verifier <cmd>` with no `--timeout` and `ask_new` with no `verifier.timeout_seconds` both store `60`. A timeout that is given must be in range on both surfaces: `ask new --verifier <cmd> --timeout <n>` with `n` outside 1..3600 exits `2` with `ask new: --timeout must be between 1 and 3600 (got <n>)` and writes nothing, as `ask_new` refuses the same `verifier.timeout_seconds` (§5.1). An explicit `0` is out of range like any other value; it does not mean "default" — omit the flag (or the argument) for that. `--timeout` without `--verifier` has nothing to apply to and is ignored, unchecked. Item files written before that was so hold `0`. They are still valid: every read (`show`, `list`, the MCP tools) reports a stored `0` as `60`, so a caller never sees `0` and needs no branch for it. A read does not rewrite the file; the stored value becomes `60` the next time the item is written.
@@ -179,7 +179,7 @@ A JSON array of Item objects, in the order rendered by the human view (§3). Emp
 
 ### 1.5 `ask show --json`
 
-A single Item object. If the id is not found, no JSON is emitted; exit code 3 with a stderr message (§2).
+A single Item object. If the id is not found, no JSON is emitted; exit code 3 with a stderr message (§2). The object is the item alone: subscriptions and fires are not part of it, and `ask show --json` reads neither `subs/` nor `fires/`. The text form of `ask show` adds a `Subscriptions:` section for an item that has any (§14.6).
 
 ### 1.6 `ask new`
 
@@ -251,11 +251,12 @@ The full taxonomy. Every CLI invocation returns exactly one of these.
 | Code | Meaning | Examples |
 |---|---|---|
 | `0` | Success | normal completion of any verb |
-| `2` | Validation error | bad flag, missing required arg, title >200 chars, urgency not in set, invalid transition (e.g. `resolve` on a `closed` item), unknown subcommand, unknown help topic, attempt to set `verifier.type` to a reserved-but-unimplemented value (`url`, `mcp`) |
+| `2` | Validation error | bad flag, missing required arg, title >200 chars, urgency not in set, invalid transition (e.g. `resolve` on a `closed` item), unknown subcommand, unknown help topic, attempt to set `verifier.type` to a reserved-but-unimplemented value (`url`, `mcp`), `ask subscribe` on a `closed` item or with a handler that is not installed (§14.2) |
 | `3` | Not found | id prefix matches zero items |
 | `4` | Ambiguous id prefix | id prefix matches >1 items |
 | `5` | I/O / disk error | cannot read/write `.ask/`, corrupt `config.json` (§7), an item file that is corrupt or carries a `schema_version` other than `"1"` (§1.1.1) when a verb addresses that item (`ask list` skips it with a warning and exits `5` only if no item was readable, or if `--strict` was given and any item was skipped, §7.2), atomic-rename failure, no `.ask/` present when one is required (run `ask init` first) |
-| `6` | Already-handled idempotent no-op | `resolve` on a `resolved` item, `close` on a `closed` item, `reopen` on an `open` item, `ask init` in an already-initialized directory when no fields would change. Always paired with a stderr warning. Stdout still emits the success-shape (id or item) so scripts can pipe results uniformly. |
+| `6` | Already-handled idempotent no-op | `resolve` on a `resolved` item, `close` on a `closed` item, `reopen` on an `open` item, `ask init` in an already-initialized directory when no fields would change, `ask subscribe` when an identical subscription is already stored. Always paired with a stderr warning. Stdout still emits the success-shape (id or item) so scripts can pipe results uniformly. |
+| `8` | Stored, but the event it waits for has already happened | `ask subscribe` on an item that is already `resolved`, with a subscription that names `resolve` (§14.2). The subscription is stored and a stderr line says so; it fires only if the item is reopened and resolved again. Distinct from `0` so a caller that subscribed in order to be told of the resolve learns it has to look at the item now. Only `ask subscribe` returns it. |
 | `7` | Stranded store | `.ask/config.json` is absent but `.ask/items/` holds item files (§7). Distinct from `5` so a consumer can tell "no inbox here" from "an unreachable inbox holding N asks" without inspecting `.ask/items/` itself. `ask init` in that directory is the repair; it adopts the existing items. |
 
 Notes:
@@ -341,7 +342,7 @@ Within a single project, the namespace is 2^16 ≈ 65,536 ids. At ≥256 items, 
 3. Hard cap: 1024 retries. On overflow, exit code 5 with stderr message `id collision retries exceeded; .ask/items/ may be at capacity`.
 4. The final `created_at` written into the item file matches the value used in the hash that produced the chosen id. Callers do not see the nudged timestamp unless they `ask show` immediately after; the nudge is at most 1µs in practice.
 
-Concurrent writers: the directory re-read is the only collision check, and `ask new` does not take the store lock. Two simultaneous `ask new` calls on different processes can race and produce the same id; the second `os.Rename` will overwrite the first. This is still out of scope. Writers of an existing item (`resolve`, `reopen`, `close`, `update`, `harvest`) are a different case: they are serialized by the store lock (§8), so any number of agents may write to one store at once. Reconsider the `ask new` race if dogfooding shows it.
+Concurrent writers: the directory re-read is the only collision check, and `ask new` does not take the store lock. Two simultaneous `ask new` calls on different processes can race and produce the same id; the second `os.Rename` will overwrite the first. This is still out of scope. Writers of an existing item or of its subscriptions (`resolve`, `reopen`, `close`, `update`, `harvest`, `subscribe`, `unsubscribe`) are a different case: they are serialized by the store lock (§8), so any number of agents may write to one store at once. Reconsider the `ask new` race if dogfooding shows it.
 
 ### 4.3 Prefix lookup
 
@@ -359,11 +360,11 @@ Implements act's prefix-resolution policy:
 
 ## 5. MCP tool schemas
 
-`ask mcp` exposes one tool per CLI verb. Wire protocol: JSON-RPC 2.0 over stdio, MCP `2024-11-05`, server name `ask-mcp`, server version matches `BinaryVersion`. Each tool's `inputSchema` is a JSON Schema (draft 2020-12, but only using draft-7-compatible features) declaring the same fields as the CLI flags. Each tool's success response is the corresponding `--json` output (§1) wrapped in the MCP `content` envelope.
+`ask mcp` exposes seven tools: one for each verb an agent uses on an item in the middle of its own loop (`new`, `list`, `show`, `update`, `resolve`, `reopen`, `close`). The verbs that set up or administer a store or its callbacks (`init`, `harvest`, `subscribe`, `unsubscribe`, `fires`) are CLI-only, as are `mcp`, `help` and `version`. A status change made through a tool fires the item's subscriptions exactly as the CLI verb does (§14.4); the tool's result is unchanged by it. Wire protocol: JSON-RPC 2.0 over stdio, MCP `2024-11-05`, server name `ask-mcp`, server version matches `BinaryVersion`. Each tool's `inputSchema` is a JSON Schema (draft 2020-12, but only using draft-7-compatible features) declaring the same fields as the CLI flags. Each tool's success response is the corresponding `--json` output (§1) wrapped in the MCP `content` envelope.
 
 ### 5.1 Common conventions
 
-- Tool names: `ask_new`, `ask_list`, `ask_show`, `ask_update`, `ask_resolve`, `ask_reopen`, `ask_close`. (`init` and `harvest` are **not** exposed via MCP — setting up or administering a store is a developer action, not something an agent does to an item mid-loop.)
+- Tool names: `ask_new`, `ask_list`, `ask_show`, `ask_update`, `ask_resolve`, `ask_reopen`, `ask_close`. (`init`, `harvest`, `subscribe`, `unsubscribe` and `fires` are **not** exposed via MCP — setting up or administering a store, and wiring or inspecting its callbacks, is a developer action, not something an agent does to an item mid-loop.)
 - Required vs optional in each schema mirrors CLI requiredness.
 - Every `maxLength` a schema advertises is enforced by the server, not left to the client: a longer value is a validation error (code 2, §5.5) whose message names the field and the limit, e.g. `ask new: body exceeds 16384 characters (got 16385)`, and nothing is written. Length is counted in characters (Unicode code points), as JSON Schema defines `maxLength`. These are limits of the MCP boundary, applied to each argument a call sends and never to what is already stored; the CLI does not apply the free-text caps (§1.1 says which limits it does apply, and why the rest are left off). The `title` limit is the exception that both surfaces share, counted the same way.
 - One limit bounds a stored result rather than an argument: `ask_update` refuses a `body_append` that would leave the stored body longer than 1048576 characters (§5.4.1). Per-argument caps alone would let a client grow an item forever one within-limit append at a time; this ceiling stops that, and sits far enough above 16384 that it never blocks an append to a body the CLI wrote long. The CLI has no such ceiling.
@@ -604,7 +605,7 @@ Reporting both cases identically is how a full inbox gets counted as zero by any
 
 ### 7.2 Reads never create a store
 
-Opening a store for a read (any verb other than `ask init`) is **non-mutating**: no `.ask/` and no `.ask/items/` is created, whether the open succeeds or fails. Only `ask init` creates `.ask/`, and only the first item write creates `.ask/items/`. A read that fails must leave the directory exactly as it found it — otherwise a single `ask list` in the wrong directory enrols it permanently as a store-shaped husk that later sweeps cannot distinguish from a real one.
+Opening a store for a read (any verb other than `ask init`) is **non-mutating**: no `.ask/` and no `.ask/items/` is created, whether the open succeeds or fails. Only `ask init` creates `.ask/`, and only the first item write creates `.ask/items/`. The same holds for everything else a store can hold. `.ask/.lock` is created by the first write that takes the lock (§8.2), `.ask/subs/` by the first `ask subscribe` that stores something (§14.1), and `.ask/fires/` by the first fire (§14.5); `list`, `show`, `fires` and the MCP tools of the first two create none of them, and a `subscribe` that is refused creates no `subs/`. A read that fails must leave the directory exactly as it found it — otherwise a single `ask list` in the wrong directory enrols it permanently as a store-shaped husk that later sweeps cannot distinguish from a real one.
 
 Item files (`.ask/items/ask-XXXX.json`) follow the same policy individually: a corrupt item file makes that one id unreadable (`ask show ask-XXXX` → exit 5, `ask list` skips it and emits a stderr warning per skipped id but continues with the rest, exit 0 if at least one item was readable, exit 5 only if every requested item was unreadable). The skip-and-warn behavior is the only deviation from "no auto-recovery"; it is necessary so that one bad file does not lock the entire inbox.
 
@@ -647,9 +648,11 @@ Atomic rename keeps one write whole; it does not stop two writers from each load
 
 - The lock is `flock(LOCK_EX)` on `.ask/.lock`. The file is created by the first write that needs it and is never removed; its content is never read.
 - `resolve`, `reopen`, `close` and `update`, on the CLI, and `ask_resolve`, `ask_reopen`, `ask_close` and `ask_update` over MCP, hold the lock across the whole sequence: resolve the id prefix, load the item, apply the change, save. Both surfaces call one function for this, so they cannot drift apart.
+- `ask subscribe` and `ask unsubscribe` hold the lock the same way: resolve the id prefix, load the item and its subs file, change the subs file, save. A subscription and a status change on one item therefore never interleave: the change either sees the subscription and fires it, or does not see it and the subscriber is told the item's status as it was (§14.2).
+- A status change appends the `started` line of each fire it causes (§14.5) while it still holds the lock, and starts the runners after releasing it. A runner takes no lock at any point: its one write is a single `write(2)` appending the fire's result line to a file opened in append mode, so lines from any number of runners and writers never interleave.
 - `ask harvest` holds the target's and the source's locks for the whole operation, taken in path order so two harvests in opposite directions cannot each hold one.
 - The lock is taken by trying a non-blocking `flock` every 25 ms for at most 10 s. On timeout the verb exits `5` (MCP code `5`) with `ask <verb>: store is locked by another ask process (waited 10s); nothing was written`. Every locked section is a few milliseconds, so the timeout only fires when another process is stuck while holding the lock. A process that dies releases its lock.
-- Reads (`list`, `show`, and their MCP tools) take no lock, never wait on a writer, and never create `.ask/.lock`.
+- Reads (`list`, `show`, `fires`, and the MCP tools of the first two) take no lock, never wait on a writer, and never create `.ask/.lock`.
 - `ask new` and `ask init` take no lock. `ask new` writes a file no other writer has loaded; its only race is the id collision described in §4.2.
 - The command's time is read once, before the lock is taken, and that one value is what a transition stamps (`resolved_at`, `closed_at`, `verified_at`).
 
@@ -667,6 +670,8 @@ When an agent (not `ask` itself, in v1) runs a verifier:
 - **Capture:** stdout and stderr both captured, concatenated in chronological order if possible (else stdout then stderr), then trimmed to ≤65536 chars for storage in `verification_output` (§1.1).
 
 Rationale for no allowlist: verifiers are user-authored commands that typically rely on the user's shell environment (PATH, NVM, ASDF, virtualenv activations, AWS_PROFILE, etc.). Scrubbing them would make most useful verifiers fail. Since `ask` does not execute the verifier itself in v1, this is also a description of what agents should do, not what `ask` enforces.
+
+A callback handler (§14.3) is the opposite case, and gets the opposite rule. ask runs a handler itself, and runs it from whatever process happened to change the item: a person's shell, an agent's session, a long-lived MCP server. That process's environment is not the handler author's and can hold credentials the handler has no business seeing, so a handler's environment is built from a fixed list and inherits nothing else. A verifier is run by the agent that chose to run it, in an environment that agent already has; ask never runs it, so ask has nothing to build.
 
 The `ask help verifier` topic must include this paragraph verbatim or close to it.
 
@@ -740,6 +745,250 @@ repeatable OR) and `recipient` (MCP, single string).
 
 ---
 
+## 14. Callbacks: subscriptions, handlers and fires
+
+A subscription says "when this item is resolved, closed or reopened, run this handler". It exists so that a party other than the one that filed an item can be told when the item changes, without polling. ask stores subscriptions beside the item, runs the handlers when the item's status changes, and keeps a record of every run. Nothing here changes the Item object (§1.1), `ask show --json`, or any MCP tool's arguments or results.
+
+`ask help callbacks` carries the working summary; `docs/callbacks.md` is the guide to writing a handler.
+
+### 14.1 The subs file
+
+An item's subscriptions live in `.ask/subs/<item-id>.json`. An item with no subscriptions has no file: the file is written by the first subscription stored and removed with the last one removed. `.ask/subs/` is created by the first write.
+
+```json
+{
+  "schema_version": "1",
+  "item": "ask-3c89",
+  "subscriptions": [
+    {
+      "id":       "6d69ca27",
+      "events":   ["resolve", "close", "reopen"],
+      "handler":  "record",
+      "args":     { "thread": "abc" },
+      "added_at": "2026-05-15T10:30:00Z"
+    }
+  ]
+}
+```
+
+| Field | Constraints |
+|---|---|
+| `schema_version` | the string `"1"`. A file carrying another value is unreadable, on the footing of an item file in another version (§1.1.1). |
+| `item` | the id the file is named for. A file naming another item is unreadable. |
+| `subscriptions[].id` | 8 lowercase hex characters, random, unique within the file |
+| `subscriptions[].events` | a non-empty subset of `resolve`, `close`, `reopen`, always in that order. `any` on the command line is stored as all three. |
+| `subscriptions[].handler` | a handler name (§14.3) |
+| `subscriptions[].args` | object of string to string, `{}` when none. At most 16 entries; each key matches `^[a-z][a-z0-9_]{0,31}$`; each value is at most 1024 bytes and holds no NUL. Arguments are data: ask hands them to the handler and never interprets them. |
+| `subscriptions[].added_at` | RFC 3339 UTC, when the subscription was stored |
+
+An item holds at most 32 subscriptions. The file is written by atomic rename (§8.1) under the store lock (§8.2). An unreadable subs file (corrupt, another version, another item's, or a stray in the way, §1.1.1) makes every verb that reads or writes the item's subscriptions exit 5; a status change on the item still goes through and fires nothing.
+
+### 14.2 `ask subscribe` and `ask unsubscribe`
+
+Both are CLI-only.
+
+```
+ask subscribe <id> --on <event>[,<event>] --handler <name> [--arg key=value ...] [--json]
+```
+
+`--on` takes `resolve`, `close`, `reopen`, or `any`, comma-separated. `--arg` is repeatable; a flag without `=`, or a key given twice, is refused. `subscribe` stores the subscription and reports the item's status as it was under the lock. It never runs the handler.
+
+- Without `--json`: `ask-3c89: subscribed 6d69ca27 (resolve,close,reopen -> record); status open` on stdout; `already subscribed` in place of `subscribed` when nothing was added.
+- With `--json`: `{ "id": "ask-3c89", "status": "open", "subscription": { ...the stored record... } }`.
+
+Exit codes, checked in this order:
+
+| When | Exit | Stored? |
+|---|---|---|
+| the item is `closed` (a closed item never changes again); the handler name breaks the name rule; no installed handler has that name (stderr lists the installed ones); an argument breaks its rule; the item already holds 32 subscriptions | `2` | no |
+| the item is already `resolved` and the subscription names `resolve` | `8` | yes: it fires if the item is reopened and resolved again. A stderr line says so. |
+| an identical subscription (same handler, same arguments, same set of events) is already stored | `6` | no; the existing one is reported |
+| otherwise | `0` | yes |
+
+`3`, `4` and `5` are as for every verb that addresses an item. Because `subscribe` holds the store lock while it reads the status, there is no window in which the item is resolved between the check and the store: the caller either gets `0` and the handler fires on the resolve, or gets `8` and knows to read the item now.
+
+```
+ask unsubscribe <id> <subscription-id> [--json]
+```
+
+The subscription id is the 8-hex id `ask show` lists, or any prefix of it (1 to 8 lowercase hex characters) that matches one subscription of that item. Prints `ask-3c89: unsubscribed 6d69ca27`, or with `--json` `{ "id": "...", "unsubscribed": { ...the removed record... } }`. Exit `3` when the item or the subscription is not found, `4` when either prefix is ambiguous. A fire already started for a subscription that is then removed is recorded as `not_run` (§14.5).
+
+### 14.3 Handlers
+
+A handler is an executable file at `~/.config/ask/callbacks/<name>`, in the home directory of the user ask runs as, on the host where the store lives. Handlers are installed by hand; ask never writes to that directory.
+
+- **Name:** `^[a-z0-9][a-z0-9_-]{0,63}$`. Lowercase only, no separator, no leading dash or dot, so a name is always one file directly under the callbacks directory and two names never address one file on a case-insensitive filesystem.
+- **At subscribe time** the name must resolve, following symlinks, to a regular file with an execute bit; otherwise exit 2 (§14.2). This is a check for typos, not a guarantee: the handler is looked up again at every fire.
+- **At fire time** the handler is started by its path under the callbacks directory, so `$0` is the name it was subscribed by even when that path is a symlink.
+
+What a handler is run with:
+
+| | |
+|---|---|
+| Working directory | the project root: the directory that holds `.ask/` |
+| Standard input | one JSON object, no trailing newline: `{ "item": <Item, §1.1>, "event": "resolve", "from": "open", "to": "resolved", "at": "<transition time>", "args": { ... } }`. `item` is the item as the store holds it when the handler starts, which is after the change that fired it. |
+| Standard output and error | one pipe; the last 4096 bytes are kept in the fire record |
+| Time | 60 seconds |
+
+The environment is **built, not inherited**. It holds exactly these variables and nothing else from the process that changed the item:
+
+| Variable | Value |
+|---|---|
+| `PATH` | `/usr/bin:/bin:<the directory holding the ask binary>:$HOME/.local/bin` |
+| `HOME` | the user's home directory |
+| `LANG` | the caller's `LANG`, or `en_US.UTF-8` when it has none |
+| `ASK_ID` | the item id |
+| `ASK_EVENT` | `resolve`, `close` or `reopen` |
+| `ASK_SUB_ID`, `ASK_FIRE_ID` | the subscription's and the fire's 8-hex ids |
+| `ASK_FROM_STATUS`, `ASK_TO_STATUS` | the item's status before and after the change |
+| `ASK_AT` | the transition time, RFC 3339 UTC: the instant the item's own timestamp carries for this change |
+| `ASK_STORE` | the project root |
+| `ASK_ARG_<KEY>` | one per argument, the key upper-cased |
+
+§9 says why a verifier's environment is inherited and a handler's is not.
+
+The contract a handler author can rely on:
+
+- **At most once.** A change fires each subscription that names it once. A handler is never retried: not after a non-zero exit, not after a timeout, not when it could not be started, not when the host went down while it ran. Nothing delivers a fire later.
+- **It cannot touch the write.** The item was saved before any handler was started, and the command that changed it has not waited. Nothing a handler does, or fails to do, changes that command's exit code, its output, or its MCP result.
+- **60 seconds.** At the timeout the handler's process group is sent SIGTERM, and SIGKILL 2 seconds later, so what the handler started goes with it. A handler that needs longer starts its own detached work and returns.
+- **Output is stored and shown. Never print a secret.** The last 4096 bytes a handler writes to stdout and stderr go into the fire record (§14.5), a file in the store, and `ask fires` prints them to anyone who can read the store. `ask harvest` carries them to another store.
+- **Its own settings live elsewhere.** Every file in the callbacks directory is a handler, so a handler keeps configuration and credentials out of it. The convention is `~/.config/ask/callback-config/<name>.env`, mode 0600, read by the handler itself. ask neither reads nor creates it.
+
+### 14.4 Firing
+
+A fire happens when a write changes an item's status, through the CLI or an MCP tool alike:
+
+| Change | Event |
+|---|---|
+| `open` to `resolved` | `resolve` |
+| anything to `closed` | `close` |
+| `resolved` to `open` | `reopen` |
+
+A change that leaves the status alone fires nothing: an idempotent no-op (exit 6), `ask update`, `ask new`, `ask subscribe`.
+
+The sequence, for a status change on an item with subscriptions:
+
+1. Under the store lock, after the item is saved, the changing process reads the item's subs file and, for each subscription whose `events` include this event, appends a `started` line to the item's fire record (§14.5). A subscription whose `started` line cannot be written is not fired: a fire that cannot be recorded does not run.
+2. The lock is released and the command returns as it always did. Firing cannot fail the write or change what the command prints.
+3. For each recorded fire the process starts one detached runner (ask re-executing itself, in a new session, with the project root as its working directory and its standard streams on `/dev/null`) and does not wait for it. The new session is deliberate: a supervisor that kills a finished job's process group, or a terminal that hangs up, would otherwise take the runner down before the handler ran.
+4. The runner loads the subscription and the item from the store itself, checks that the subscription is still there and still names the event, runs the handler (§14.3), and appends the fire's `result` line. It takes no lock.
+
+The runner is an internal verb of the binary, not part of the CLI surface. It and the process that started it can be different builds (a long-lived MCP server re-executes whatever file is at its own path, which an upgrade may have replaced), so the invocation carries a protocol version, and a runner handed one it does not know records `spawn_failed` rather than guess.
+
+### 14.5 The fire record
+
+`.ask/fires/<item-id>.jsonl` is append-only and holds two JSON lines per fire, paired by their `fire` id. The file and `.ask/fires/` are created by the first fire of that item, never by a read; the file is mode 0600, because a result line holds handler output.
+
+```json
+{"v":1,"fire":"cafbd927","sub":"6d69ca27","handler":"record","event":"resolve","from":"open","to":"resolved","at":"2026-05-15T10:30:00.123456Z","phase":"started","ts":"2026-05-15T10:30:00.124Z"}
+{"v":1,"fire":"cafbd927","sub":"6d69ca27","phase":"result","state":"ok","exit_code":0,"detail":null,"duration_ms":212,"ts":"2026-05-15T10:30:00.340Z","output":"recorded\n"}
+```
+
+| Key | Line | Meaning |
+|---|---|---|
+| `v` | both | record version, the integer `1` |
+| `fire` | both | 8 lowercase hex characters, new for every fire |
+| `sub` | both | the subscription's id |
+| `handler`, `event`, `from`, `to` | started | what is being run, for which change |
+| `at` | started | the transition time, the same instant as the item's `resolved_at` or `closed_at` for that change |
+| `phase` | both | `started` or `result` |
+| `ts` | both | when the line was written, RFC 3339 UTC |
+| `state` | result | see below |
+| `exit_code` | result | the handler's exit code, or `null` when it has none |
+| `detail` | result | a short reason, or `null` |
+| `duration_ms` | result | from the start of the run to the result line |
+| `output` | result | the last 4096 bytes of the handler's stdout and stderr together; `""` when it never ran |
+
+Result states:
+
+| `state` | Meaning | `exit_code` | `detail` |
+|---|---|---|---|
+| `ok` | the handler exited 0 | `0` | `null` |
+| `failed` | the handler exited non-zero, or died on a signal | the code, or `null` for a signal | `null`, or the signal |
+| `not_run` | the handler was never started | `null` | `no handler named <name>`, `not runnable` (the path is not an executable regular file), or `subscription removed before it ran` |
+| `spawn_failed` | the runner or the handler could not be started, or the runner could not use what it loaded (an unreadable subs file or item, a stored argument that breaks its rule) | `null` | the operating system's error, the reason, or `runner protocol mismatch` |
+| `timeout` | the handler was still running at 60 s and was killed | `null` | `null` |
+
+A `started` line with no `result` line is a fire whose handler is still running, or whose runner died before it could write one. Readers report it as state `started`; it is never written to the file.
+
+Each line is one `write(2)` on a descriptor opened in append mode, so lines from the process that changed the item and from any number of runners never interleave. The record is a file on disk and readers do not trust it: a symlink where the file or `.ask/fires/` should be is refused, not followed; the file is found by its exact name among the directory's entries, so a file named for another spelling of the id is not the item's; a line that is not a record line in version 1 (not JSON, another `v`, an id not in the shape above, an unknown phase, or longer than 64 KiB) is left out, as are a `started` line repeating a fire id, a `result` line pairing with no `started` line, and a second `result` line for one fire.
+
+### 14.6 Reading fires: `ask fires` and `ask show`
+
+```
+ask fires [<id-or-prefix>] [--json]
+```
+
+CLI-only. With an id, that item's fires, oldest first; without, every fire in the store, oldest first by when each started. It takes no lock and creates nothing. Exit `0` including when there are no fires; `2` for more than one id; `3` / `4` / `5` as for every verb that addresses an item.
+
+- With `--json`: an array, `[]` when there are no fires, of
+
+  ```json
+  {
+    "item": "ask-3c89", "fire": "cafbd927", "sub": "6d69ca27", "handler": "record",
+    "event": "resolve", "from": "open", "to": "resolved",
+    "at": "2026-05-15T10:30:00.123456Z",
+    "started_at": "2026-05-15T10:30:00.124Z", "finished_at": "2026-05-15T10:30:00.34Z",
+    "state": "ok", "exit_code": 0, "detail": null, "duration_ms": 212, "output": "recorded\n"
+  }
+  ```
+
+  in that key order. `started_at` and `finished_at` are the `ts` of the two lines. For a fire with no result line `state` is `"started"`, `finished_at`, `exit_code`, `detail` and `duration_ms` are `null`, and `output` is `""`. `output` is exactly what was stored.
+- Without `--json`: one block per fire, blocks separated by a blank line:
+
+  ```
+  fire cafbd927  item ask-3c89  subscription 6d69ca27  handler record
+    2026-05-15T10:30:00Z  resolve  open -> resolved
+    ok, exit 0 in 0.2 s
+    output:
+      recorded
+  ```
+
+  The third line is the state in the words listed below. The `output:` block is left out when the handler printed nothing. If lines of the record were left out (§14.5), stderr says how many, per item.
+
+`ask show <id>` in its text form lists an item's subscriptions under `Subscriptions:`, one line each (`- <id> <handler> on <events> [key="value" ...] added <time>`), and under each subscription its latest 3 fires, oldest first, one line each:
+
+```
+<time>  <event>   ok, exit 0 in 0.4 s
+<time>  <event>   failed, exit 22 in 7.2 s
+<time>  <event>   failed, <signal> in 7.2 s
+<time>  <event>   not run: no handler named <name> on this machine
+<time>  <event>   not run: the handler <name> is not an executable file on this machine
+<time>  <event>   not run: subscription removed before it ran
+<time>  <event>   not run: could not be started: <detail>
+<time>  <event>   killed at the 60 s timeout
+<time>  <event>   started, no result after <age> (it is running)
+<time>  <event>   started, no result after <age> (it died; it is not retried)
+```
+
+A fire with no result line reads "it is running" until 90 seconds after it started, which is past the timeout and the kill, and "it died" from then on. When a subscription has nothing of the kind to show, exactly one line says why:
+
+```
+not fired yet: no <events> since this was added
+missed: <event> at <time> by a build that does not fire; not retried
+```
+
+`missed` is §14.8. A `missed` line is also listed, in time order with the fires, when a subscription has fires as well. If the fire record cannot be read, each subscription gets `fire record unreadable: <reason>` in place of these lines and `show` still exits 0.
+
+`<time>` is the transition time, RFC 3339 UTC to the second. The durations and `<age>` (`12 s`, `4 min`, `3 h`, `9 d`) are the only relative figures. `ask show` never prints a handler's output; that is `ask fires`. Everything either verb prints as text from a subs file or a fire record has its non-printable characters replaced by spaces (control characters and escape sequences, and the invisible ones that reorder or hide text), so a stored value cannot forge a line or drive the terminal it is read on. `--json` carries values as stored.
+
+### 14.7 `ask harvest`
+
+`ask harvest` copies, for each source item: the item, its subs file if it has subscriptions, and its fire record if it has one. Of the record it carries the record lines (§14.5) as they were written and no other line. With `--clean` all three source files are removed after every copy has succeeded. Without the record, a harvested item whose handler ran would meet the `missed` rule in the target store.
+
+The all-or-nothing rule of §1.1.1 covers the two new files: a source subs file or fire record that cannot be read, and a target file in `subs/` or `fires/` whose name differs from a source file's only in case, each refuse the whole harvest before anything is written.
+
+Harvest cannot tell whether a handler really ran. A carried fire record is the source store's account, on the same footing as its items and subscriptions. A harvested subscription names a handler on the host of the target store; if none is installed under that name there, its fires are recorded as `not_run`.
+
+### 14.8 Builds without callbacks
+
+A build of ask from before this section leaves subs files on disk and fires nothing, and a long-lived process keeps being the build it was started as: an `ask mcp` server started before an upgrade resolves and closes items without firing until it is restarted. Nothing is delivered afterwards.
+
+The miss is on disk, and `ask show` states it. For each subscription: when the item's `resolved_at` is later than the subscription's `added_at`, the subscription names `resolve`, and the fire record holds no fire of that subscription for `resolve` at that time, `show` prints `missed: resolve at <time> by a build that does not fire; not retried`. The same holds for `closed_at` and `close`. A missed reopen cannot be detected, because a reopen stamps no time on the item (it clears `resolved_at`).
+
+---
+
 ## 11. Cross-check against brief
 
 This section confirms every spec-deferred item the brief mentions is resolved above. Each row references the brief section that punted and the spec section that lands the decision.
@@ -768,13 +1017,15 @@ This section confirms every spec-deferred item the brief mentions is resolved ab
 | (new) config.json corruption | §7 |
 | (new) `filed_by` convention | §10 |
 | (new) `recipient` field (agent-to-agent label) | §13 |
+| (new) Callbacks: subscriptions, handlers, firing, the fire record | §14 |
 
 **v1: deferred items** (intentionally not pinned by this spec; tracked for post-v1):
 
 - Concurrent-resume safety (two agents picking up the same `resolved` item and both acting on it). The store lock (§8.2) means only one of two concurrent transitions wins and the other sees exit 6, but ask does not hand out claims on a resolved item; revisit if dogfooding surfaces real loss.
 - Concurrent `ask new` from two processes colliding on id. Documented in §4.2.
-- Verifier execution by `ask` itself (`ask verify <id>` verb). Not in v1 surface; would be additive.
-- Aggregated cross-project inbox, TUI, web UI, push notifications, custom item types. Listed in brief §Out of scope; spec adds nothing.
+- Verifier execution by `ask` itself (`ask verify <id>` verb). Not in v1 surface; would be additive. ask executes one kind of thing, a subscribed callback handler (§14), and that does not change this: a handler is told that an item changed and decides nothing about it.
+- Retrying a handler, delivering a fire that a build without callbacks missed, detecting a missed reopen, and firing on anything but a status change (a new item, an `update`). §14.4 and §14.8 say what happens instead.
+- Aggregated cross-project inbox, TUI, web UI, custom item types. Listed in brief §Out of scope; spec adds nothing. Push notification by ask itself stays out of scope too: ask sends nothing anywhere. A handler (§14) is how a party that wants to be told arranges it, with its own code and its own credentials.
 
 ---
 
@@ -784,8 +1035,9 @@ To keep post-v1 changes additive rather than breaking:
 
 - **Item schema:** new fields must default to `null` or `[]` and must not change the meaning of existing fields. v1 parsers should ignore unknown fields on read (`json.Decoder` without `DisallowUnknownFields`). The `schema_version` field (§1.1.1) is the migration hook for any change that *can't* be expressed as a pure additive field — bump it and treat the old value as legacy on the read path.
 - **`config.json`:** same. New fields default to absent-tolerant values.
-- **Exit codes:** the taxonomy in §2 is closed; new error classes get new codes (`8`, `9`, ...) rather than reusing existing ones with new semantics. (`7` was added this way for the stranded-store case, §7.1.)
+- **Exit codes:** the taxonomy in §2 is closed; new error classes get new codes (`8`, `9`, ...) rather than reusing existing ones with new semantics. (`7` was added this way for the stranded-store case, §7.1, and `8` for a subscription stored after the event it names, §14.2.)
 - **MCP tools:** new tools are additive. Existing tools' `inputSchema` may grow optional properties; required properties cannot change. Response shape changes are breaking and require a wire-version bump.
+- **Subs files and fire records:** a subs file carries its own `schema_version` (§14.1) and every fire record line its own `v` (§14.5), independent of the Item's `schema_version`. A subs file in another version is unreadable, like an item in another version; a fire record line in another version is left out by readers. New keys in either are additive.
 - **CLI flags:** new flags must be optional. Renaming an existing flag is breaking and requires a major-version bump.
 
 ---

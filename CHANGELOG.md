@@ -41,6 +41,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `not_run`, `spawn_failed` or `timeout`, with the exit code and the last 4096 bytes of
   output. A failing handler never fails or changes the write and is never retried; exit
   codes, stdout and the MCP envelopes of `resolve`, `close` and `reopen` are unchanged.
+- `ask fires [<id>] [--json]` reads back what handlers did: one block per fire, oldest first,
+  with the output each handler printed; without an id, every fire in the store. `--json` is
+  an array of `{item, fire, sub, handler, event, from, to, at, started_at, finished_at, state,
+  exit_code, detail, duration_ms, output}`, `[]` when nothing has fired; a fire that has not
+  finished has `state: "started"`. CLI-only.
+- `ask show` says, under each subscription, what its last 3 fires did, in words (`ok, exit 0
+  in 0.4 s`, `failed, exit 22 in 7.2 s`, `not run: no handler named <name> on this machine`,
+  `killed at the 60 s timeout`, `started, no result after <age>`), or `not fired yet`, or
+  `missed: <event> at <time> by a build that does not fire; not retried` when the item was
+  resolved or closed after the subscription was added and no fire was recorded for it. It
+  never prints a handler's output. `ask show --json` is unchanged.
+- `ask harvest` carries an item's fire record with it, as it carries its subscriptions, and
+  `--clean` removes the source copy.
+- Docs for callbacks: spec §14 (the subs file, the handler contract, firing, the fire record,
+  the reads, exit code 8), `docs/callbacks.md` (how to write a handler) and the new
+  `ask help callbacks` topic.
 - `ask version` distinguishes builds. Without an `-ldflags` stamp it now prints
   `dev+<commit>[.dirty] <commit time>` from the build info Go embeds in every build from a
   checkout, instead of the bare `dev` — so a stale install is visible from the binary itself.
@@ -63,6 +79,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   repair and adopts the existing items.
 
 ### Changed
+- `ask help workflow`, `ask help mcp` and the spec no longer say that ask runs nothing and
+  that every CLI verb has an MCP tool. ask still never runs a verifier and never polls; it
+  now runs a subscribed handler on a status change. The MCP server has seven tools, and
+  `init`, `harvest`, `subscribe`, `unsubscribe` and `fires` are CLI-only.
 - `make release-local` no longer builds `windows/amd64`. The store lock is unix-only, and
   Windows was already outside the platforms ask ships for.
 - The skill's filing rules now carry a **has-agent-arm check**: before filing, state why no
