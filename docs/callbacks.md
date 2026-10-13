@@ -56,12 +56,12 @@ ASK_EVENT=resolve
 ASK_FIRE_ID=cafbd927
 ASK_FROM_STATUS=open
 ASK_ID=ask-3c89
-ASK_STORE=/path/to/project
+ASK_STORE=<the project root>
 ASK_SUB_ID=6d69ca27
 ASK_TO_STATUS=resolved
-HOME=/home/you
+HOME=<your home directory>
 LANG=en_US.UTF-8
-PATH=/usr/bin:/bin:/path/to/ask/dir:/home/you/.local/bin
+PATH=/usr/bin:/bin:<the directory holding ask>:<your home directory>/.local/bin
 ```
 
 - `ASK_EVENT` is `resolve` (open to resolved), `close` (anything to closed) or `reopen` (resolved to open).
