@@ -979,6 +979,8 @@ missed: <event> at <time> by a build that does not fire; not retried
 
 The all-or-nothing rule of §1.1.1 covers the two new files: a source subs file or fire record that cannot be read, and a target file in `subs/` or `fires/` whose name differs from a source file's only in case, each refuse the whole harvest before anything is written.
 
+A fire whose handler may still be running refuses it too. The runner takes no lock (§14.4), so a harvest at that moment would carry the fire's `started` line without its result, and the runner would then write the `result` line into the source store (with `--clean`, re-creating the source record holding that line alone): in the target the fire would read as died for a handler that finished. So when any source item's fire record holds a fire with no result line whose `started` line was written less than 90 seconds ago (the running window of §14.6), harvest exits `5`, writes nothing to either store, and names each such item, fire and handler; the caller retries once the handler has finished, at most 90 seconds after it started. A `started` line older than that is a dead runner, whose result will never come, and does not refuse. Harvest refuses rather than waits so that it never holds both store locks for the length of a handler.
+
 Harvest cannot tell whether a handler really ran. A carried fire record is the source store's account, on the same footing as its items and subscriptions. A harvested subscription names a handler on the host of the target store; if none is installed under that name there, its fires are recorded as `not_run`.
 
 ### 14.8 Builds without callbacks

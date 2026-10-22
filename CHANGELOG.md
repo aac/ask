@@ -92,6 +92,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a human's inbox.
 
 ### Fixed
+- `ask harvest` no longer splits a fire whose handler is still running. The runner takes no
+  lock, so a harvest while a handler ran copied the fire's `started` line alone, and the
+  `result` line landed in the source store afterwards (with `--clean`, re-creating
+  `.ask/fires/<id>.jsonl` there holding just that line). In the target the fire read
+  "started, no result after <age> (it died; it is not retried)" for a handler that had
+  finished. Harvest now refuses, exit 5 with nothing written to either store, while any
+  source item has a fire with no result line that started less than 90 seconds ago (the
+  60-second handler timeout plus the kill, the same window `ask show` uses for "it is
+  running"); the message names the item, the fire and the handler. Retry once the handler
+  has finished. A fire older than that has a dead runner and does not hold harvest up.
 - A Claude Code session started inside a checkout of this repo no longer gets a failing
   `ask` MCP server. The plugin's server was declared in a root `.mcp.json`, which Claude Code
   also reads as project-scope config for any session rooted there; `${CLAUDE_PLUGIN_ROOT}` is

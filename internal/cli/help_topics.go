@@ -645,6 +645,9 @@ Where it lives
                          started line and a result line. Mode 0600.
   ask harvest carries both with the item. A carried fire record is the
   source store's account of what ran; harvest does not check it.
+  While a fire has no result line and started under 90 s ago, its
+  handler may still be running, and harvest refuses (exit 5, the item
+  named): retry once the handler has finished.
 
 Older builds
   A build of ask from before callbacks leaves subscriptions on disk and
