@@ -23,10 +23,8 @@ import (
 var firesNow = time.Now
 
 // fireRunningWindow is how long a fire with no result line is taken to be
-// still running: the handler timeout plus the time the runner gives a
-// killed handler to go away, with room to spare. Past it the runner is
-// dead and the result line will never come.
-const fireRunningWindow = 90 * time.Second
+// still running (core.FireRunningWindow).
+const fireRunningWindow = core.FireRunningWindow
 
 // runFires implements `ask fires [<id-or-prefix>] [--json]`. With an id,
 // that item's fires, oldest first; without, every fire in the store. It

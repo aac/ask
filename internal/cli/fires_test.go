@@ -539,6 +539,69 @@ func TestHarvestedItemDoesNotShowMissed(t *testing.T) {
 	}
 }
 
+// TestHarvestRefusesWhileAHandlerRuns harvests a store while a fire's
+// handler is still running (act-afab33). The runner takes no lock, so a
+// harvest at that moment would carry a started line with no result into
+// the target, and its result line would land in the source afterwards
+// (with --clean, re-creating the source record holding it alone). The
+// harvest refuses with nothing written either side, and once the handler
+// has finished the same harvest carries a record holding the result.
+func TestHarvestRefusesWhileAHandlerRuns(t *testing.T) {
+	bin, _ := fireBinaries(t)
+	for _, clean := range []bool{false, true} {
+		t.Run(fmt.Sprintf("clean=%v", clean), func(t *testing.T) {
+			src := newFireWorld(t, bin)
+			src.install("slow", "#!/bin/sh\nsleep 2\necho done\n")
+			id := src.newItem("moves mid-fire")
+			src.subscribe(id, "resolve", "slow")
+			src.mustRun(0, "resolve", id)
+			if n := len(firePhase(src.fireLines(id), "result")); n != 0 {
+				t.Fatalf("the handler finished before the harvest could run (%d result line(s))", n)
+			}
+
+			dst := &fireWorld{t: t, bin: bin, home: src.home, proj: filepath.Join(filepath.Dir(src.proj), "target"), callbacks: src.callbacks}
+			if err := os.MkdirAll(dst.proj, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			dst.mustRun(0, "init")
+			args := []string{"harvest", "--from", src.proj}
+			if clean {
+				args = append(args, "--clean")
+			}
+			code, out, errOut := dst.run(args...)
+			if code != 5 {
+				t.Fatalf("harvest while the handler runs: exit %d, want 5\nstdout: %s\nstderr: %s", code, out, errOut)
+			}
+			if !strings.Contains(errOut, "still running") || !strings.Contains(errOut, id) || !strings.Contains(errOut, "handler slow") {
+				t.Errorf("refusal does not name the item and its running handler: %s", errOut)
+			}
+			for _, p := range []string{dst.itemPath(id), dst.firesPath(id)} {
+				if _, err := os.Stat(p); !os.IsNotExist(err) {
+					t.Errorf("the refused harvest wrote %s: %v", p, err)
+				}
+			}
+			if _, err := os.Stat(src.itemPath(id)); err != nil {
+				t.Errorf("the refused harvest removed the source item: %v", err)
+			}
+
+			src.waitResults(id, 1)
+			dst.mustRun(0, args...)
+			fires := dst.mustRun(0, "fires", id, "--json")
+			var got []core.Fire
+			if err := json.Unmarshal([]byte(fires), &got); err != nil {
+				t.Fatalf("decode fires: %v\n%s", err, fires)
+			}
+			if len(got) != 1 || got[0].State != "ok" {
+				t.Errorf("fires in the target after the handler finished: %s", fires)
+			}
+			_, err := os.Stat(src.firesPath(id))
+			if clean && !os.IsNotExist(err) {
+				t.Errorf("--clean left a source fire record: %v", err)
+			}
+		})
+	}
+}
+
 // TestShowKeepsAStoredSubscriptionToItsLine: a subs file is a file on
 // disk. A handler name or event in it that carries an escape sequence, a
 // line break or a direction override does not reach the terminal.

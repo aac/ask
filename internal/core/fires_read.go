@@ -20,6 +20,13 @@ import (
 // one. It is never stored; only a read reports it.
 const FireStateStarted = "started"
 
+// FireRunningWindow is how long a fire with no result line is taken to be
+// still running: the handler timeout plus the time the runner gives a
+// killed handler to go away, with room to spare. Past it the runner is
+// dead and the result line will never come. `ask show` words a fire by
+// it, and Harvest refuses an item with a fire inside it.
+const FireRunningWindow = 90 * time.Second
+
 // Fire is one fire as a read reports it: the started line and, when the
 // runner has written it, the result line. Field order is the key order of
 // `ask fires --json`.
@@ -172,6 +179,13 @@ func (s *FileStore) LoadFires(id string) (fires []Fire, skipped int, err error) 
 	if err != nil || !ok {
 		return []Fire{}, 0, err
 	}
+	fires, skipped = parseFires(id, b)
+	return fires, skipped, nil
+}
+
+// parseFires reads the fires of the item id out of the bytes of its fire
+// record, by the rules LoadFires states.
+func parseFires(id string, b []byte) (fires []Fire, skipped int) {
 	fires = []Fire{}
 	index := map[string]int{}
 	for _, raw := range bytes.Split(b, []byte{'\n'}) {
@@ -207,7 +221,7 @@ func (s *FileStore) LoadFires(id string) (fires []Fire, skipped int, err error) 
 			f.State, f.ExitCode, f.Detail, f.Output = l.State, l.ExitCode, l.Detail, l.Output
 		}
 	}
-	return fires, skipped, nil
+	return fires, skipped
 }
 
 // FiredItemIDs lists, sorted, the ids of the items that have a fires

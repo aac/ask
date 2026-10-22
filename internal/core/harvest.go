@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 )
 
 // ErrIDCollision is returned by Harvest when the source store contains one
@@ -33,6 +34,45 @@ var ErrUnreadableSource = errors.New("unreadable source item(s)")
 // fires file of a source item that has one, named as fires/<file>. The
 // message names each such file; neither store is mutated.
 var ErrStrayTarget = errors.New("target file differs from a source item's only in case")
+
+// ErrFireRunning is returned by Harvest when a source item has a fire
+// whose handler may still be running: a started line with no result line,
+// written less than FireRunningWindow ago. The runner takes no lock, so
+// its result line would land in the source store after the copy, and with
+// --clean re-create the source record holding that line alone, while the
+// target kept a fire that reads as died (act-afab33). The message names
+// each such item and fire; neither store is mutated. A started line older
+// than the window is a dead fire and does not refuse.
+var ErrFireRunning = errors.New("a handler is still running")
+
+// harvestNow is the clock Harvest measures a fire's age against. Tests
+// replace it.
+var harvestNow = time.Now
+
+// runningFires returns one "<id> (fire <fire>, handler <name>, started
+// <n> s ago)" entry for every fire in record with no result line that
+// started within FireRunningWindow of now. A started time ahead of now
+// by less than the window counts as running, as `ask show` reads it;
+// further ahead it is a broken clock, not a running handler.
+func runningFires(id string, record []byte, now time.Time) []string {
+	fires, _ := parseFires(id, record)
+	var out []string
+	for _, f := range fires {
+		if f.State != FireStateStarted {
+			continue
+		}
+		age := now.Sub(f.StartedAt)
+		if age >= FireRunningWindow || age <= -FireRunningWindow {
+			continue
+		}
+		if age < 0 {
+			age = 0
+		}
+		out = append(out, fmt.Sprintf("%s (fire %s, handler %s, started %d s ago)",
+			id, f.Fire, f.Handler, int(age/time.Second)))
+	}
+	return out
+}
 
 // strayTargetTwins returns one "<label><file> (source <id>)" entry for
 // every name in target's subdir (items, subs or fires) that a source id's
@@ -113,6 +153,11 @@ type HarvestResult struct {
 //     Each item's subscriptions (.ask/subs/<id>.json) are read in the same
 //     pass; an unreadable subs file fails the harvest the same way. So is
 //     its fire record (.ask/fires/<id>.jsonl), and so does that fail it.
+//     A fire record holding a fire that may still be running (a started
+//     line with no result, younger than FireRunningWindow) refuses the
+//     harvest too (ErrFireRunning, naming the item and fire): the runner
+//     takes no lock and would write its result into the source after the
+//     copy (act-afab33).
 //   - Copy pass: each loaded item is Save'd to target, then its
 //     subscriptions, if it has any, then its fire record, if it has one:
 //     its record lines as they were written, and no other line (see
@@ -178,6 +223,8 @@ func Harvest(target, source *FileStore, clean bool) (*HarvestResult, error) {
 	fires := make([][]byte, 0, len(srcIDs)) // nil for an item with no fire record
 	var subbed []string                     // readable source ids that have subscriptions
 	var fired []string                      // readable source ids that have a fire record
+	var running []string                    // fires whose handler may still be running
+	now := harvestNow()
 	for _, id := range srcIDs {
 		if checkID(id) != nil {
 			// A stray: its name is not an id, so the report names the
@@ -206,6 +253,7 @@ func Harvest(target, source *FileStore, clean bool) (*HarvestResult, error) {
 			// is how the passes below know there is none.
 			record, _ = fireRecordLines(record)
 			fired = append(fired, id)
+			running = append(running, runningFires(id, record, now)...)
 		}
 		items = append(items, it)
 		subs = append(subs, f)
@@ -236,6 +284,15 @@ func Harvest(target, source *FileStore, clean bool) (*HarvestResult, error) {
 	case len(unreadable) > 0:
 		refusal = fmt.Errorf("%w (%d), nothing copied: %w",
 			ErrUnreadableSource, len(unreadable), unreadable)
+	}
+	if len(running) > 0 {
+		r := fmt.Errorf("%w, nothing copied: %s; its result would be written to the source store after the copy, so retry once it has finished, at most %d s after it started",
+			ErrFireRunning, strings.Join(running, ", "), int(FireRunningWindow/time.Second))
+		if refusal != nil {
+			refusal = fmt.Errorf("%w; %w", refusal, r)
+		} else {
+			refusal = r
+		}
 	}
 	if len(twins) > 0 {
 		stray := fmt.Errorf("%w, nothing copied: %s", ErrStrayTarget, strings.Join(twins, ", "))
