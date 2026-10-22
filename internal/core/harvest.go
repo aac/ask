@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // ErrIDCollision is returned by Harvest when the source store contains one
@@ -69,9 +70,31 @@ func runningFires(id string, record []byte, now time.Time) []string {
 			age = 0
 		}
 		out = append(out, fmt.Sprintf("%s (fire %s, handler %s, started %d s ago)",
-			id, f.Fire, f.Handler, int(age/time.Second)))
+			id, f.Fire, safeHandlerName(f.Handler), int(age/time.Second)))
 	}
 	return out
+}
+
+// safeHandlerName is a handler name read from a fire record, made safe
+// for the line of text a refusal prints. The record is a file on disk,
+// possibly harvested from another store, so the name is not trusted: one
+// in the handler name shape is printed as is, and anything else is cut to
+// 64 bytes and printed Go-quoted, which escapes control characters,
+// escape sequences and the invisible ones that reorder or hide text. The
+// id and fire id need no such care: the id came from the listing and was
+// checked, and parseFireLine admits only 8-hex fire ids.
+func safeHandlerName(name string) string {
+	if handlerNameRe.MatchString(name) {
+		return name
+	}
+	if len(name) > 64 {
+		cut := 64
+		for cut > 0 && !utf8.RuneStart(name[cut]) {
+			cut--
+		}
+		name = name[:cut] + "..."
+	}
+	return fmt.Sprintf("%q", name)
 }
 
 // strayTargetTwins returns one "<label><file> (source <id>)" entry for
