@@ -40,8 +40,8 @@ blocked until the ask resolves (see `docs/brief.md` → Blocker-handling protoco
 `scripts/smoke-external-dep.sh` is the end-to-end test for that handshake. It
 exercises both binaries against an isolated tempdir: files an ask with
 `--blocks <act-id>`, registers the matching block on the act side with
-`act update --ext-add`, asserts `act ready` excludes the blocked issue, resolves
-the ask, clears the dependency, and asserts the issue returns to `act ready`. The
+`act dep add <act-id> --external <ask-id>`, asserts `act ready` excludes the blocked issue, resolves
+the ask, clears the dependency with `act update --ext-rm`, and asserts the issue returns to `act ready`. The
 script self-cleans on exit, makes no network calls, and fails fast with a named
 step on any drift.
 

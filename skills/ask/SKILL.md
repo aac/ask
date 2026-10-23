@@ -53,9 +53,18 @@ Save client ID and secret to .env.local as GITHUB_CLIENT_ID and GITHUB_CLIENT_SE
   --blocks act-1234
 ```
 
-`--blocks` is optional: it names the tracker-issue id (`act-XXXX`) whose work is blocked pending this ask. ask stores it verbatim and never interprets it; the consumer is `ask list --blocks=<id>` and tooling like `act ready`. Omit if the ask maps to no tracker issue.
+`--blocks` is optional: it names the tracker-issue id (`act-XXXX`) whose work is blocked pending this ask. ask stores it verbatim and never interprets it; its consumer is `ask list --blocks=<id>`. Nothing reads it automatically — `act` knows nothing about ask stores, so `--blocks` alone does not change `act ready`. Omit if the ask maps to no tracker issue.
 
-`--blocks` vs `--tracker-ref`: use `--blocks` for a *blocking* relationship — the issue waits on this ask, and `act ready` hides it until the ask resolves. Use `--tracker-ref` only for a non-blocking back-pointer to the issue that *motivated* the ask (provenance; no queue effect). When in doubt it's `--blocks` — that's the integrated one.
+`--blocks` vs `--tracker-ref`: use `--blocks` for a *blocking* relationship — the issue waits on this ask. Use `--tracker-ref` only for a non-blocking back-pointer to the issue that *motivated* the ask (provenance; no queue effect). When in doubt it's `--blocks` — that's the integrated one.
+
+**Blocking an act issue is two steps.** `--blocks` records the edge on the ask side only. To make `act ready` hide the issue (and `act` claim/close refuse it without `--force`), also register the reciprocal block on the act side:
+
+```sh
+ask new "..." --blocks act-1234          # prints ask-5678
+act dep add act-1234 --external ask-5678  # act ready now hides act-1234
+```
+
+When the ask resolves, clear it with `act update act-1234 --ext-rm ask-5678`, which returns the issue to `act ready`. `scripts/smoke-external-dep.sh` is the end-to-end test of this handshake.
 
 ## Urgency
 
@@ -133,7 +142,7 @@ Per entry, required: `title`, `body`. Optional: `urgency` (default `normal`), `v
 **Orchestrator protocol on receiving asks** — for each entry:
 
 1. File with `ask new`, passing `--blocks <id>` for each surfaced `blocks`.
-2. For blocker asks tied to a tracker issue, register the reciprocal external-dep on that issue via your tracker's mechanism (e.g. `act update --add-dep`), and unclaim/park the issue so the ready-queue stops surfacing it. The blocker halts the blocked unit of work, not the whole loop.
-3. On a resume checkpoint, for each ask closed since the last one, clear the reciprocal dep on its `blocks` issues to return them to the queue. `ask list --status=closed --blocks=<id>` is the per-issue query.
+2. For blocker asks tied to a tracker issue, register the reciprocal external-dep on that issue via your tracker's mechanism (for act: `act dep add <id> --external <ask-id>`), and unclaim/park the issue so the ready-queue stops surfacing it. The blocker halts the blocked unit of work, not the whole loop.
+3. On a resume checkpoint, for each ask closed since the last one, clear the reciprocal dep on its `blocks` issues to return them to the queue (for act: `act update <id> --ext-rm <ask-id>`). `ask list --status=closed --blocks=<id>` is the per-issue query.
 
 **Harvest fallback.** `ask harvest --from <path> [--clean]` copies items from another `.ask/` into the current store (collision-checked; `--clean` removes the source so re-runs no-op). Use it when a subagent called `ask new` directly and its items must come across before its directory is pruned, or for filesystem-shared dispatch. Surface-via-report is the default; wiring harvest into a regular loop signals the dispatch prompt isn't telling subagents to surface.
