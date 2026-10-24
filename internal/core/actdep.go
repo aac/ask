@@ -7,7 +7,8 @@ import "regexp"
 // narrow. ask still stores every ref verbatim and never interprets it;
 // this shape only decides whether `ask new` prints the act-side
 // follow-up command, and a ref that matches is safe to paste into a
-// shell as is.
+// shell as is. TestActIDRe_MatchesIDsTheActBinaryMints checks it against
+// ids a real act binary mints.
 var actIDRe = regexp.MustCompile(`^act-[0-9a-f]{4,32}$`)
 
 // ActDepHintPrefix leads each follow-up line `ask new` writes to stderr
