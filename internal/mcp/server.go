@@ -301,8 +301,7 @@ func (s *Server) handleToolsCall(ctx context.Context, enc *json.Encoder, req jso
 func (s *Server) invoke(name string, args json.RawMessage) (content []toolContent, meta map[string]any, isErr bool) {
 	switch name {
 	case "ask_new":
-		body, isErr := callNew(s.repoRoot, args)
-		return textContent(body), nil, isErr
+		return callNew(s.repoRoot, args)
 	case "ask_list":
 		return callList(s.repoRoot, args)
 	case "ask_show":

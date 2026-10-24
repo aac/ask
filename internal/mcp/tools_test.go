@@ -573,10 +573,13 @@ func TestAskNewWithBlocks(t *testing.T) {
 			},
 		},
 	})
-	body, isErr := extractToolBody(t, resp)
-	if isErr {
-		t.Fatalf("ask_new with blocks isError: %s", body)
+	// content[0] is the item; the act ref adds the act-dep hint part
+	// (TestAskNewBlocksActDepPart pins that part).
+	tr := extractToolResult(t, resp)
+	if tr.IsError || len(tr.Content) == 0 {
+		t.Fatalf("ask_new with blocks: %+v", tr)
 	}
+	body := []byte(tr.Content[0].Text)
 	var created core.Item
 	if err := json.Unmarshal(body, &created); err != nil {
 		t.Fatalf("decode created: %v\nbody: %s", err, body)
@@ -593,7 +596,7 @@ func TestAskNewWithBlocks(t *testing.T) {
 			"arguments": map[string]any{"id": created.ID},
 		},
 	})
-	body, isErr = extractToolBody(t, resp)
+	body, isErr := extractToolBody(t, resp)
 	if isErr {
 		t.Fatalf("ask_show isError: %s", body)
 	}

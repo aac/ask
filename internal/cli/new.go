@@ -147,6 +147,13 @@ func runNew(args []string) int {
 		fmt.Fprintf(os.Stderr, "ask new: warning: %s\n", w)
 	}
 
+	// The act side of the block handshake: --blocks alone does not hide
+	// the act issue from `act ready`. stderr only; stdout stays the id
+	// or the item (spec §1.6).
+	for _, cmd := range core.ActDepCommands(item.ID, item.Blocks) {
+		fmt.Fprintln(os.Stderr, core.ActDepHintPrefix+cmd)
+	}
+
 	if *asJSON {
 		emitJSON(item)
 	} else {

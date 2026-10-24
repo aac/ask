@@ -270,10 +270,26 @@ type verifierArgs struct {
 	TimeoutSeconds int    `json:"timeout_seconds"`
 }
 
-func callNew(repoRoot string, raw json.RawMessage) (string, bool) {
+// callNew returns the created item as content[0]. For each act-shaped
+// `blocks` ref it adds one text part carrying the line `ask new` writes
+// to stderr: the `act dep add` command that completes the block
+// handshake (spec §1.6, §5.2). An error is a single part.
+func callNew(repoRoot string, raw json.RawMessage) ([]toolContent, map[string]any, bool) {
+	body, item, isErr := newBody(repoRoot, raw)
+	parts := textContent(body)
+	if isErr || item == nil {
+		return parts, nil, isErr
+	}
+	for _, cmd := range core.ActDepCommands(item.ID, item.Blocks) {
+		parts = append(parts, toolContent{Type: "text", Text: core.ActDepHintPrefix + cmd})
+	}
+	return parts, nil, false
+}
+
+func newBody(repoRoot string, raw json.RawMessage) (string, *core.Item, bool) {
 	var args newArgs
 	if err := json.Unmarshal(raw, &args); err != nil {
-		return encodeErr(2, "ask new: "+err.Error()), true
+		return encodeErr(2, "ask new: "+err.Error()), nil, true
 	}
 	title := strings.TrimSpace(args.Title)
 	// A missing title keeps ask_new's own wording ("is required": the
@@ -281,10 +297,10 @@ func callNew(repoRoot string, raw json.RawMessage) (string, bool) {
 	// core.ValidateTitle's "must not be empty" fits). The remaining rules
 	// — length, newlines — are the shared ones.
 	if title == "" {
-		return encodeErr(2, "ask new: title is required"), true
+		return encodeErr(2, "ask new: title is required"), nil, true
 	}
 	if msg, ok := core.ValidateTitle(title); !ok {
-		return encodeErr(2, "ask new: "+msg), true
+		return encodeErr(2, "ask new: "+msg), nil, true
 	}
 	urgency := args.Urgency
 	if urgency == "" {
@@ -292,7 +308,7 @@ func callNew(repoRoot string, raw json.RawMessage) (string, bool) {
 	}
 	u := core.Urgency(urgency)
 	if !u.Valid() {
-		return encodeErr(2, fmt.Sprintf("ask new: invalid urgency %q (want blocker|normal|fyi)", urgency)), true
+		return encodeErr(2, fmt.Sprintf("ask new: invalid urgency %q (want blocker|normal|fyi)", urgency)), nil, true
 	}
 	// Spec §1.2: v1 only accepts verifier.type "shell"; url/mcp are reserved.
 	if args.Verifier != nil {
@@ -301,10 +317,10 @@ func callNew(repoRoot string, raw json.RawMessage) (string, bool) {
 			vt = string(core.VerifierShell)
 		}
 		if vt != string(core.VerifierShell) {
-			return encodeErr(2, fmt.Sprintf("ask new: invalid verifier type %q (only %q in v1)", vt, core.VerifierShell)), true
+			return encodeErr(2, fmt.Sprintf("ask new: invalid verifier type %q (only %q in v1)", vt, core.VerifierShell)), nil, true
 		}
 		if strings.TrimSpace(args.Verifier.Command) == "" {
-			return encodeErr(2, "ask new: verifier.command is required"), true
+			return encodeErr(2, "ask new: verifier.command is required"), nil, true
 		}
 	}
 	// Each blocks ref must be non-empty after trim and within the
@@ -313,7 +329,7 @@ func callNew(repoRoot string, raw json.RawMessage) (string, bool) {
 	// characters (Unicode code points) as the schema's maxLength does.
 	for _, ref := range args.Blocks {
 		if msg, ok := core.ValidateRef("blocks", ref); !ok {
-			return encodeErr(2, "ask new: "+msg), true
+			return encodeErr(2, "ask new: "+msg), nil, true
 		}
 	}
 	// recipient (when present) is validated the same way as a single
@@ -321,7 +337,7 @@ func callNew(repoRoot string, raw json.RawMessage) (string, bool) {
 	// (== "") means no recipient; that's fine.
 	if args.Recipient != "" {
 		if msg, ok := core.ValidateRef("recipient", args.Recipient); !ok {
-			return encodeErr(2, "ask new: "+msg), true
+			return encodeErr(2, "ask new: "+msg), nil, true
 		}
 	}
 	// The remaining advertised maxLength caps (the title, blocks and
@@ -345,7 +361,7 @@ func callNew(repoRoot string, raw json.RawMessage) (string, bool) {
 	}
 	for _, c := range caps {
 		if msg, bad := tooLong("new", c.field, c.value, c.max); bad {
-			return encodeErr(2, msg), true
+			return encodeErr(2, msg), nil, true
 		}
 	}
 	// Everything else the schema advertises (schemacheck.go): links
@@ -353,17 +369,17 @@ func callNew(repoRoot string, raw json.RawMessage) (string, bool) {
 	// verifier.timeout_seconds 1..3600, unknown arguments. title is
 	// skipped: it was validated above on its trimmed value.
 	if msg, bad := schemaViolation("ask_new", raw, "title"); bad {
-		return encodeErr(2, msg), true
+		return encodeErr(2, msg), nil, true
 	}
 
 	store, err := core.OpenStore(repoRoot, nil)
 	if err != nil {
-		return encodeErr(storeErrCode(err), "ask new: "+err.Error()), true
+		return encodeErr(storeErrCode(err), "ask new: "+err.Error()), nil, true
 	}
 	now := time.Now().UTC()
 	existing, err := store.ListIDs()
 	if err != nil {
-		return encodeErr(5, "ask new: "+err.Error()), true
+		return encodeErr(5, "ask new: "+err.Error()), nil, true
 	}
 	set := make(map[string]struct{}, len(existing))
 	for _, id := range existing {
@@ -373,7 +389,7 @@ func callNew(repoRoot string, raw json.RawMessage) (string, bool) {
 
 	id, err := core.NewID(store.Config().ProjectID, now, title, exists)
 	if err != nil {
-		return encodeErr(5, "ask new: "+err.Error()), true
+		return encodeErr(5, "ask new: "+err.Error()), nil, true
 	}
 	item := core.NewItem(id, title, u, core.StatusOpen, now)
 	item.Body = args.Body
@@ -403,9 +419,10 @@ func callNew(repoRoot string, raw json.RawMessage) (string, bool) {
 		}
 	}
 	if err := store.Save(item); err != nil {
-		return encodeErr(5, "ask new: "+err.Error()), true
+		return encodeErr(5, "ask new: "+err.Error()), nil, true
 	}
-	return encodeJSON(item)
+	body, isErr := encodeJSON(item)
+	return body, item, isErr
 }
 
 // ----- ask_list --------------------------------------------------------------
