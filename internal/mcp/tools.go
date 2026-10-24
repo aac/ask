@@ -101,7 +101,7 @@ func tools() []toolDescriptor {
 	return []toolDescriptor{
 		{
 			Name:        "ask_new",
-			Description: "File a new ask. Returns the created Item object (spec §1.1).",
+			Description: "File a new ask. Returns the created Item object as content[0] (spec §1.1). Each `blocks` ref shaped like an act id (act-<hex>) adds one text part ending in `act dep add <act-id> --external <new-ask-id>`: `blocks` alone does not hide the act issue from `act ready`, so run that command to complete the block (spec §1.6).",
 			InputSchema: map[string]any{
 				"type":                 "object",
 				"required":             []string{"title"},

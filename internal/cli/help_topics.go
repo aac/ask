@@ -264,7 +264,9 @@ Tools
       blocks      string[] of opaque cross-tool refs (each 1..1024
                   chars, non-whitespace); ask never interprets the
                   format. Typically act-XXXX ids.
-    Returns: the created Item object.
+    Returns: the created Item object as content[0]; each act-shaped
+    blocks ref adds one text part with the act-side command,
+    act dep add <act-id> --external <new-ask-id>.
 
   ask_list
     Args:

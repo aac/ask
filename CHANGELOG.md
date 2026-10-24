@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `ask new --blocks act-X` prints the second step of the block handshake. `--blocks` alone
+  does not hide the act issue from `act ready`; it needs `act dep add act-X --external
+  <ask-id>` too, which was easy to forget. Now, for each `--blocks` ref shaped like an act id,
+  `ask new` writes that exact command to stderr (`ask new: act ready ignores --blocks until
+  the act issue carries the dep; run: act dep add act-X --external ask-Y`), with or without
+  `--json`. Stdout is unchanged. MCP `ask_new` adds the same line as one more text part after
+  the item in `content[0]`; a result with no act-shaped ref is unchanged.
 - MCP `ask_list` reports skipped item files as data. When an unreadable item file was
   skipped, the result carries `"_meta": {"ask/skipped": [{"id", "reason"}]}`, one entry per
   skipped id, so a program can tell a partial list from a complete one without parsing the

@@ -25,7 +25,7 @@ func runNew(args []string) int {
 	filedBy := fs.String("filed-by", "", "Free-form filer id")
 	recipient := fs.String("recipient", "", "Free-form recipient ref (e.g. agent:data-prep, human:andrew, team:reviewers)")
 	var blocks stringSliceFlag
-	fs.Var(&blocks, "blocks", "Forward edge: a tracker item this ask blocks (e.g. act-3c89); consumed by ask list --blocks; act ready honors it only once the act issue carries the matching external dep; repeatable")
+	fs.Var(&blocks, "blocks", "Forward edge: a tracker item this ask blocks (e.g. act-3c89); consumed by ask list --blocks; act ready honors it only once the act issue carries the matching external dep, and for an act id ask new prints that act dep add command to stderr; repeatable")
 	asJSON := fs.Bool("json", false, "Output the new item as JSON")
 	if err := fs.Parse(reorderFlagsFirst(args)); err != nil {
 		return handleParseErr(err, fs, "new",

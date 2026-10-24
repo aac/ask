@@ -64,6 +64,8 @@ ask new "..." --blocks act-1234          # prints ask-5678
 act dep add act-1234 --external ask-5678  # act ready now hides act-1234
 ```
 
+`ask new` reminds you: for each `--blocks` ref shaped like an act id it writes the exact second-step command to stderr (`ask new: act ready ignores --blocks until the act issue carries the dep; run: act dep add act-1234 --external ask-5678`), and `ask_new` returns the same line as an extra content part after the item. Run it; stdout is still just the id (or the item under `--json`).
+
 When the ask resolves, clear it with `act update act-1234 --ext-rm ask-5678`, which returns the issue to `act ready`. `scripts/smoke-external-dep.sh` is the end-to-end test of this handshake.
 
 ## Urgency

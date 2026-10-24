@@ -186,6 +186,7 @@ A single Item object. If the id is not found, no JSON is emitted; exit code 3 wi
 - Without `--json`: prints the id followed by `\n` to stdout (e.g. `ask-3c89\n`). Nothing else on stdout.
 - With `--json`: prints the full Item object that was just written.
 - Relative-date warning: when the title or body contains relative-date language (`today`, `tonight`, `tomorrow`, `yesterday`, `this morning`, `last night`, `this week`, `next week`, `in N days`, `N days ago`, or a weekday name with no date within a few characters of it), one line per phrase goes to stderr, prefixed `ask new: warning:`, naming the absolute date the phrase resolves to at filing time in the filer's local zone. The item is still filed, exit 0; stdout is unchanged. Recurring days (`every Monday`, `Sundays`) do not warn.
+- Act-dep follow-up: `--blocks` records the edge on the ask side only, and `act ready` keeps listing the act issue until it carries the reciprocal external dep. So for each `blocks` ref shaped like an act id (`act-` followed by 4..32 lowercase hex digits, e.g. `act-3c89`), `ask new` writes one line to stderr, in `--blocks` order with repeats dropped, naming the command that completes the handshake: `ask new: act ready ignores --blocks until the act issue carries the dep; run: act dep add <act-id> --external <new-ask-id>`. The command is everything after `run: `, and the act-id shape guarantees it is safe to paste into a shell. A ref of any other shape gets no line (ask still stores it verbatim; the shape decides only the hint). This applies with and without `--json`: stdout is unchanged, the item is filed, exit 0. `ask_new` carries the same line as an extra content part (§5.2).
 
 ### 1.7 `ask init`
 
@@ -420,7 +421,7 @@ Implements act's prefix-resolution policy:
 }
 ```
 
-Return: the created Item object (§1.1).
+Return: the created Item object (§1.1) as `content[0]`. For each act-shaped `blocks` ref (§1.6), one further `type: "text"` part follows, carrying exactly the stderr line `ask new` writes: `ask new: act ready ignores --blocks until the act issue carries the dep; run: act dep add <act-id> --external <new-ask-id>`. With no act-shaped ref the result has the single part it always had. No `_meta` is set.
 
 `blocks` validation: in addition to the schema's minLength/maxLength,
 the handler rejects refs that are whitespace-only after trim (code 2).
