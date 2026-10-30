@@ -200,9 +200,9 @@ A single Item object. If the id is not found, no JSON is emitted; exit code 3 wi
 
 ### 1.8.1 `ask update`
 
-`ask update <id>` corrects an item's `title` and/or `body` in place. It makes **no** state transition and stamps no lifecycle timestamps: an ask that still needs a human stays `open` while its wording is fixed. It is allowed on items in any status — correcting the record of something already closed is not a state change.
+`ask update <id>` corrects an item's `title`, `body`, and/or `verifier` in place. It makes **no** state transition and stamps no lifecycle timestamps: an ask that still needs a human stays `open` while its wording is fixed. It is allowed on items in any status — correcting the record of something already closed is not a state change.
 
-Flags (the body flags are mutually exclusive; supplying more than one is a validation error, exit 2):
+Flags (the body flags are mutually exclusive, as are the two verifier flags; supplying more than one of a group is a validation error, exit 2):
 
 | Flag | Meaning |
 |---|---|
@@ -211,6 +211,8 @@ Flags (the body flags are mutually exclusive; supplying more than one is a valid
 | `--body-file=<path>` | Replace the body with the UTF-8 contents of `path`. `-` reads stdin. |
 | `--body-append=<text>` | Append to the existing body, separated by a blank line. An empty existing body yields the addition alone (no leading blank line). |
 | `--body-append-file=<path>` | As `--body-append`, reading the text from `path` (`-` = stdin). |
+| `--verifier=<cmd>` | Replace the verifier's shell command. An existing verifier keeps its `type` and `timeout_seconds`; an item with no verifier gains one (`type: "shell"`, `timeout_seconds: 60`), as `ask new --verifier` would have given it. An empty or whitespace-only command is a validation error (exit 2) — removing the verifier is `--verifier-clear`. |
+| `--verifier-clear` | Remove the verifier (`verifier` becomes `null`). |
 
 Names mirror `act update` (`--description` / `--description-append` / `--description-file`) so the sibling tools stay learnable together; ask's field is `body`, so the flags follow the field.
 
@@ -494,7 +496,7 @@ Return: the post-transition (or current, for `ask_show`) Item object (§1.5 / §
 
 ### 5.4.1 `ask_update`
 
-The MCP twin of `ask update` (§1.8.1): corrects `title` and/or `body` in place, makes no state transition, allowed in any status.
+The MCP twin of `ask update` (§1.8.1): corrects `title`, `body`, and/or `verifier` in place, makes no state transition, allowed in any status.
 
 ```json
 {
@@ -505,7 +507,9 @@ The MCP twin of `ask update` (§1.8.1): corrects `title` and/or `body` in place,
     "id":          { "type": "string", "minLength": 1 },
     "title":       { "type": "string", "minLength": 1, "maxLength": 200 },
     "body":        { "type": "string", "maxLength": 16384 },
-    "body_append": { "type": "string", "maxLength": 16384 }
+    "body_append": { "type": "string", "maxLength": 16384 },
+    "verifier":       { "type": "string", "minLength": 1, "maxLength": 4096 },
+    "verifier_clear": { "type": "boolean" }
   }
 }
 ```
@@ -513,7 +517,9 @@ The MCP twin of `ask update` (§1.8.1): corrects `title` and/or `body` in place,
 - `title` replaces the title (same validation and trimming as `--title`).
 - `body` replaces the body; an explicit empty string clears it, an omitted field leaves it alone.
 - `body_append` appends after a blank line, as `--body-append`. The cap applies to the piece appended, not to the body that results: a `body_append` of up to 16384 characters is accepted whatever the length of the stored body, including a body the CLI already grew past 16384 (§1.1). An over-length argument is refused with `ask update: body_append exceeds 16384 characters (got <n>)`. The body that results has its own, much higher ceiling of 1048576 characters: an append that would take it past that is a validation error (code 2) and writes nothing, with `ask update: body_append would grow body past 1048576 characters (body is <n> now, would be <m>)`.
-- `body` and `body_append` together are a validation error (code 2), as is a call naming none of the three.
+- `verifier` replaces the verifier's command, as `--verifier`: a string (the command), not `ask_new`'s verifier object, since only the command is editable here. An existing verifier keeps its `type` and `timeout_seconds`; an item with none gains a shell verifier with `timeout_seconds: 60`. An empty or whitespace-only value is refused with `ask update: verifier must not be empty (use verifier_clear to remove the verifier)`.
+- `verifier_clear: true` removes the verifier, as `--verifier-clear`. `verifier_clear: false` names no change.
+- `body` and `body_append` together are a validation error (code 2), as are `verifier` and `verifier_clear: true` together, and a call naming no field at all.
 - `--body-file` / `--body-append-file` have no twin: an MCP caller already holds the text.
 
 Return: the updated Item object. When the item already reads as requested, no write happens and the call returns the §5.5 no-op envelope, with `content[1].text == "ask update: <id> already reads as requested"`.

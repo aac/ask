@@ -41,7 +41,9 @@ Transition verbs
 Text correction (no transition)
   ask update <id> [--title] [--body | --body-file <path|->]
              [--body-append <text> | --body-append-file <path|->]
-                             Correct an item's title or body in place.
+             [--verifier <cmd> | --verifier-clear]
+                             Correct an item's title, body, or verifier
+                             in place.
                              Status, timestamps and every other field are
                              untouched — an open ask stays open while its
                              wording is fixed. --body-append adds a dated
@@ -50,6 +52,9 @@ Text correction (no transition)
                              rewriting what was true when the ask was
                              filed. Never resolve-and-refile an ask that
                              still needs the human just to fix its text.
+                             --verifier replaces a wrong or stale
+                             verifier command (keeping its timeout);
+                             --verifier-clear removes the verifier.
 
 Cross-store move
   ask harvest --from <path>  Copy every item under <path>/.ask/items/

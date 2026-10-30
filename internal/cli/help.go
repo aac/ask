@@ -14,7 +14,7 @@ Commands:
   new            File a new request.
   list           List items in this project.
   show           Show one item's full detail.
-  update         Correct an item's title or body (no state change).
+  update         Correct an item's title, body, or verifier (no state change).
   subscribe      Run a handler when an item is resolved, closed or reopened.
   unsubscribe    Remove one of an item's subscriptions.
   fires          Show what the handlers of an item's subscriptions did.

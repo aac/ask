@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `ask update <id> --verifier '<cmd>'` replaces an item's verifier command in place, and
+  `--verifier-clear` removes the verifier. Before this there was no way to fix a verifier
+  that checked the wrong thing or pinned an exact version short of hand-editing the item
+  JSON. An existing verifier keeps its type and timeout; an item with none gains a shell
+  verifier with the default 60s timeout. The two flags are mutually exclusive, and an empty
+  `--verifier` is refused (exit 2) in favour of `--verifier-clear`. MCP `ask_update` takes
+  the same edit as `verifier` (the command string) and `verifier_clear: true`.
 - `ask new --blocks act-X` prints the second step of the block handshake. `--blocks` alone
   does not hide the act issue from `act ready`; it needs `act dep add act-X --external
   <ask-id>` too, which was easy to forget. Now, for each `--blocks` ref shaped like an act id,
