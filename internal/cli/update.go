@@ -1,7 +1,7 @@
 // Package cli — `ask update` corrects an item's text in place. It is the
-// only verb that edits an existing item's title or body, and it makes no
-// state transition: an ask that still needs a human stays open while its
-// wording is fixed.
+// only verb that edits an existing item's title, body, or verifier, and it
+// makes no state transition: an ask that still needs a human stays open
+// while its wording is fixed.
 package cli
 
 import (
@@ -20,6 +20,7 @@ import (
 //	ask update <id> [--title <text>]
 //	               [--body <text> | --body-file <path|-> |
 //	                --body-append <text> | --body-append-file <path|->]
+//	               [--verifier <cmd> | --verifier-clear]
 //	               [--json]
 //
 // The flag names mirror `act update` (--description / --description-append
@@ -44,11 +45,13 @@ func runUpdate(args []string) int {
 	bodyFile := fs.String("body-file", "", "Replace the body with the contents of this file (UTF-8); use - for stdin")
 	bodyAppend := fs.String("body-append", "", "Append this text to the existing body, separated by a blank line. The note-append path: annotate an ask without a read-modify-write of the whole body")
 	bodyAppendFile := fs.String("body-append-file", "", "Append the contents of this file to the existing body (UTF-8); use - for stdin")
+	verifier := fs.String("verifier", "", "Replace the verifier's shell command (keeps its timeout; adds a verifier if the item has none)")
+	verifierClear := fs.Bool("verifier-clear", false, "Remove the item's verifier")
 	asJSON := fs.Bool("json", false, "Emit the updated Item as JSON on stdout")
 	if err := fs.Parse(reorderFlagsFirst(args)); err != nil {
 		return handleParseErr(err, fs, "update",
 			"ask update <id> [flags]",
-			"Correct an item's title or body in place. Makes no state transition:\n"+
+			"Correct an item's title, body, or verifier in place. Makes no state transition:\n"+
 				"an open ask stays open. Use --body-append to add a dated status\n"+
 				"correction rather than rewriting what was true when it was filed.")
 	}
@@ -68,8 +71,19 @@ func runUpdate(args []string) int {
 		fmt.Fprintf(os.Stderr, "ask update: %s are mutually exclusive\n", strings.Join(bodyModes, ", "))
 		return 2
 	}
-	if !set["title"] && len(bodyModes) == 0 {
-		fmt.Fprintln(os.Stderr, "ask update: nothing to update (want --title, --body, --body-file, --body-append, or --body-append-file)")
+	// A --verifier-clear=false names no change; only a true one counts.
+	clearVerifier := set["verifier-clear"] && *verifierClear
+	if set["verifier"] && clearVerifier {
+		fmt.Fprintln(os.Stderr, "ask update: --verifier, --verifier-clear are mutually exclusive")
+		return 2
+	}
+	if !set["title"] && len(bodyModes) == 0 && !set["verifier"] && !clearVerifier {
+		fmt.Fprintln(os.Stderr, "ask update: nothing to update (want --title, --body, --body-file, --body-append, --body-append-file, --verifier, or --verifier-clear)")
+		return 2
+	}
+	// An empty command is not a verifier; removing one is --verifier-clear.
+	if set["verifier"] && strings.TrimSpace(*verifier) == "" {
+		fmt.Fprintln(os.Stderr, "ask update: --verifier must not be empty (use --verifier-clear to remove the verifier)")
 		return 2
 	}
 
@@ -123,6 +137,10 @@ func runUpdate(args []string) int {
 	case set["body-append"], set["body-append-file"]:
 		upd.BodyAppend = &appendBody
 	}
+	if set["verifier"] {
+		upd.Verifier = verifier
+	}
+	upd.VerifierClear = clearVerifier
 	ch, err := store.Mutate(fs.Arg(0), time.Now().UTC(), func(it *core.Item, _ time.Time) error {
 		upd.Apply(it)
 		return nil
