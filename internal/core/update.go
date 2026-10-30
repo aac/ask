@@ -6,24 +6,33 @@ import (
 	"unicode/utf8"
 )
 
-// TextUpdate is an in-place correction to an item's title and/or body —
-// the edit behind `ask update` and the `ask_update` MCP tool. Both
-// surfaces build one and call Apply, so the rules (title trimmed, body
-// replaced or appended, never both) live in exactly one place. A nil
-// field is "leave alone"; a non-nil pointer to "" is an explicit value
-// (Body: clear the body).
+// TextUpdate is an in-place correction to an item's title, body, and/or
+// verifier — the edit behind `ask update` and the `ask_update` MCP tool.
+// Both surfaces build one and call Apply, so the rules (title trimmed,
+// body replaced or appended, never both; verifier command replaced or the
+// verifier removed, never both) live in exactly one place. A nil field is
+// "leave alone"; a non-nil pointer to "" is an explicit value (Body: clear
+// the body).
 //
-// Callers reject Body and BodyAppend being set together before calling
-// Apply; if both arrive anyway, Body wins.
+// Verifier replaces the verifier's command. An existing verifier keeps
+// its type and timeout_seconds; an item with none gains a shell verifier
+// with the default timeout, as `ask new --verifier` would have given it.
+// VerifierClear removes the verifier.
+//
+// Callers reject Body with BodyAppend, and Verifier with VerifierClear,
+// before calling Apply; if both arrive anyway, Body and VerifierClear win.
 type TextUpdate struct {
-	Title      *string
-	Body       *string
-	BodyAppend *string
+	Title         *string
+	Body          *string
+	BodyAppend    *string
+	Verifier      *string
+	VerifierClear bool
 }
 
 // Empty reports whether the update names no field at all.
 func (u TextUpdate) Empty() bool {
-	return u.Title == nil && u.Body == nil && u.BodyAppend == nil
+	return u.Title == nil && u.Body == nil && u.BodyAppend == nil &&
+		u.Verifier == nil && !u.VerifierClear
 }
 
 // Apply edits it in memory and reports whether anything changed. It makes
@@ -32,6 +41,11 @@ func (u TextUpdate) Empty() bool {
 // caller should skip the write.
 func (u TextUpdate) Apply(it *Item) bool {
 	prevTitle, prevBody := it.Title, it.Body
+	var prevVerifier *Verifier
+	if it.Verifier != nil {
+		v := *it.Verifier
+		prevVerifier = &v
+	}
 	if u.Title != nil {
 		it.Title = strings.TrimSpace(*u.Title)
 	}
@@ -41,7 +55,27 @@ func (u TextUpdate) Apply(it *Item) bool {
 	case u.BodyAppend != nil:
 		it.Body = AppendBody(it.Body, *u.BodyAppend)
 	}
-	return it.Title != prevTitle || it.Body != prevBody
+	switch {
+	case u.VerifierClear:
+		it.Verifier = nil
+	case u.Verifier != nil:
+		v := Verifier{Type: VerifierShell, TimeoutSeconds: DefaultVerifierTimeoutSeconds}
+		if it.Verifier != nil {
+			v = *it.Verifier
+		}
+		v.Command = *u.Verifier
+		it.Verifier = &v
+	}
+	return it.Title != prevTitle || it.Body != prevBody ||
+		!sameVerifier(prevVerifier, it.Verifier)
+}
+
+// sameVerifier reports whether two (possibly nil) verifiers are equal.
+func sameVerifier(a, b *Verifier) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
 }
 
 // AppendBody joins an existing body and an appended note with a blank
