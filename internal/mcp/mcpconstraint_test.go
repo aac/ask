@@ -216,8 +216,10 @@ func TestEveryDeclaredArgumentIsAccepted(t *testing.T) {
 		"ask_list": {{"status": []string{"open"}, "urgency": []string{"normal"}, "blocks": "b", "recipient": "r"},
 			{"all": true}},
 		"ask_show": {{"id": it.ID}},
-		// body and body_append are mutually exclusive, so two calls.
-		"ask_update":  {{"id": it.ID, "title": "renamed", "body": "new body"}, {"id": it.ID, "body_append": "more"}},
+		// body/body_append and verifier/verifier_clear are mutually
+		// exclusive pairs, so two calls.
+		"ask_update": {{"id": it.ID, "title": "renamed", "body": "new body", "verifier": "true"},
+			{"id": it.ID, "body_append": "more", "verifier_clear": true}},
 		"ask_resolve": {{"id": it.ID, "note": "done"}},
 		"ask_reopen":  {{"id": it.ID, "reason": "not done"}},
 		"ask_close":   {{"id": it.ID, "reason": "dismissed"}},

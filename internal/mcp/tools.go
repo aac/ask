@@ -190,16 +190,18 @@ func tools() []toolDescriptor {
 		},
 		{
 			Name:        "ask_update",
-			Description: "Correct an ask's title or body in place. Makes no state transition: an open ask stays open. Give `title`, and/or one of `body` (replace; an empty string clears it) or `body_append` (add a note after a blank line). Returns the updated Item object (spec §1.8.1).",
+			Description: "Correct an ask's title, body, or verifier in place. Makes no state transition: an open ask stays open. Give `title`, and/or one of `body` (replace; an empty string clears it) or `body_append` (add a note after a blank line), and/or one of `verifier` (replace the verifier's shell command, keeping its timeout; adds a verifier if there is none) or `verifier_clear: true` (remove the verifier). Returns the updated Item object (spec §1.8.1).",
 			InputSchema: map[string]any{
 				"type":                 "object",
 				"required":             []string{"id"},
 				"additionalProperties": false,
 				"properties": map[string]any{
-					"id":          map[string]any{"type": "string", "minLength": 1},
-					"title":       map[string]any{"type": "string", "minLength": 1, "maxLength": 200},
-					"body":        map[string]any{"type": "string", "maxLength": maxTextLen},
-					"body_append": map[string]any{"type": "string", "maxLength": maxTextLen},
+					"id":             map[string]any{"type": "string", "minLength": 1},
+					"title":          map[string]any{"type": "string", "minLength": 1, "maxLength": 200},
+					"body":           map[string]any{"type": "string", "maxLength": maxTextLen},
+					"body_append":    map[string]any{"type": "string", "maxLength": maxTextLen},
+					"verifier":       map[string]any{"type": "string", "minLength": 1, "maxLength": maxVerifierCommandLen},
+					"verifier_clear": map[string]any{"type": "boolean"},
 				},
 			},
 		},
@@ -767,12 +769,16 @@ func lockedChange(repoRoot, verb, id string, fn func(*core.Item, time.Time) erro
 // omitted body must not blank the body, while `"body": ""` clears it —
 // the same distinction `ask update` draws with flag.Visit. The CLI's
 // --body-file / --body-append-file have no twin: an MCP caller already
-// holds the text.
+// holds the text. verifier is the command string, as `ask update
+// --verifier` takes it (not ask_new's verifier object): only the command
+// is editable, and verifier_clear mirrors --verifier-clear.
 type updateArgs struct {
-	ID         string  `json:"id"`
-	Title      *string `json:"title"`
-	Body       *string `json:"body"`
-	BodyAppend *string `json:"body_append"`
+	ID            string  `json:"id"`
+	Title         *string `json:"title"`
+	Body          *string `json:"body"`
+	BodyAppend    *string `json:"body_append"`
+	Verifier      *string `json:"verifier"`
+	VerifierClear bool    `json:"verifier_clear"`
 }
 
 // callUpdate is the MCP twin of `ask update` (spec §1.8.1): same
@@ -789,9 +795,21 @@ func callUpdate(repoRoot string, raw json.RawMessage) ([]toolContent, bool) {
 	if args.Body != nil && args.BodyAppend != nil {
 		return textContent(encodeErr(2, "ask update: body, body_append are mutually exclusive")), true
 	}
-	upd := core.TextUpdate{Title: args.Title, Body: args.Body, BodyAppend: args.BodyAppend}
+	if args.Verifier != nil && args.VerifierClear {
+		return textContent(encodeErr(2, "ask update: verifier, verifier_clear are mutually exclusive")), true
+	}
+	upd := core.TextUpdate{Title: args.Title, Body: args.Body, BodyAppend: args.BodyAppend,
+		Verifier: args.Verifier, VerifierClear: args.VerifierClear}
 	if upd.Empty() {
-		return textContent(encodeErr(2, "ask update: nothing to update (want title, body, or body_append)")), true
+		return textContent(encodeErr(2, "ask update: nothing to update (want title, body, body_append, verifier, or verifier_clear)")), true
+	}
+	if args.Verifier != nil && strings.TrimSpace(*args.Verifier) == "" {
+		return textContent(encodeErr(2, "ask update: verifier must not be empty (use verifier_clear to remove the verifier)")), true
+	}
+	if args.Verifier != nil {
+		if msg, bad := tooLong("update", "verifier", *args.Verifier, maxVerifierCommandLen); bad {
+			return textContent(encodeErr(2, msg)), true
+		}
 	}
 	if args.Title != nil {
 		if msg, ok := core.ValidateTitle(*args.Title); !ok {

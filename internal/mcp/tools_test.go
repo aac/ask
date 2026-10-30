@@ -1000,13 +1000,13 @@ func TestAskUpdateSchema(t *testing.T) {
 		if td.InputSchema.AdditionalProperties == nil || *td.InputSchema.AdditionalProperties {
 			t.Errorf("additionalProperties must be false")
 		}
-		for _, p := range []string{"id", "title", "body", "body_append"} {
+		for _, p := range []string{"id", "title", "body", "body_append", "verifier", "verifier_clear"} {
 			if _, ok := td.InputSchema.Properties[p]; !ok {
 				t.Errorf("schema missing property %q", p)
 			}
 		}
-		if len(td.InputSchema.Properties) != 4 {
-			t.Errorf("want exactly 4 properties, got %v", td.InputSchema.Properties)
+		if len(td.InputSchema.Properties) != 6 {
+			t.Errorf("want exactly 6 properties, got %v", td.InputSchema.Properties)
 		}
 		return
 	}
